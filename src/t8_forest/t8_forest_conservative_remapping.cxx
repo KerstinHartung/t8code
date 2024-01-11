@@ -124,7 +124,6 @@ t8_tutorial_search_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, cons
       if (is_leaf) {
         t8_locidx_t element_index = t8_forest_get_tree_element_offset (forest, ltreeid) + tree_leaf_index;
         //add index of the cell to 
-        // qKH: what is missing in the above comment?
         corners_of_cell->intersection_cell_indices->push_back( element_index );
         corners_of_cell->intersection_cell_treeid->push_back( ltreeid );
       }
@@ -138,20 +137,16 @@ t8_tutorial_search_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, cons
   }
 }
 
-// cKH
-/*
- * forest1 describes the original grid
- * forest2 describes the new grid, on which data should be remapped
- */
 // qKH: I added "corners" as argument, or is this available another way?
 void //rueckgabewert anpassen oder als pointer uebergeben - Punktwolke
-cell_intersection( t8_forest_t forest1, t8_forest_t forest2, t8_cell_corners_t *corner, t8_element_t *elem2 )
+cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corners_t *corner, t8_element_t *elem_new )
 {
   //t8_forest_element_coordinate (t8_forest_t forest, t8_locidx_t ltree_id, const t8_element_t *element, int corner_number,     
   //                              double *coordinates) 
   // following usage in t8_forest_element_diam
  
   double coordinates[3];
+  double coordinates_inside[3];
   std::vector<double*> point_cloud;
   
 
@@ -176,29 +171,33 @@ cell_intersection( t8_forest_t forest1, t8_forest_t forest2, t8_cell_corners_t *
    - add check for parallel orientation
   */
   //number of cells of old forest within new forest element
-  forest1_nr_elem = corners_of_cell->intersection_cell_indices.size()
+  forest_old_nr_elem = corners_of_cell->intersection_cell_indices.size()
   //number of corners of new forest element
   icorner         = corners_of_cell->coordinates.size()
 
-  // add loop over forest1_nr_elem (independent)
+  //todo: add loop over forest_old_nr_elem (independent)
+
   //Calculate the corner elements of first element of old tree
-  t8_forest_get_element_nodes(forest1, corner->intersection_cell_treeid[0], corner->intersection_cell_indices[0],
+  t8_forest_get_element_nodes(forest_old, corner->intersection_cell_treeid[0], corner->intersection_cell_indices[0],
         coordinates );
-  // find which coordinates of old forest lie within the new element
-  for( int icorner = 0; icorner < corners_of_cell->coordinates.size(); icorner++ )
+  // find which corners of old forest lie within the new element
+  for( int icorner = 0; icorner < coordinates.size(); icorner++ )
   {
      corner_is_inside_element = 
-       t8_forest_element_point_inside (forest2, ltreeid, element2, corners_of_cell->coordinates[icorner], tolerance);
+       t8_forest_element_point_inside (forest2, ltreeid, element2, coordinates[icorner], tolerance);
+     if (corner_is_inside_element){
+       coordinates_inside.push(coordinates);
+     }
   }
   //fill first corner of old forest into point cloud
-  point_cloud->push_back(coordinates[0]);
+  point_cloud->push_back(coordinates_inside[0]);
   //qKH: how are corners ordered? probably more checks are needed
   //todo: add loop over coordinates of old mesh outside (coordinates: 1-> 2)
   // update base (coordinates[0]) corners to consider (inewcorn) and next to points (corners_of_cell))
   // after each iteration - might switch between old and new grid until back to initial point
-  base = coordinates[0];
+  base = coordinates_inside[0];
   nmatchcorners = icorner;
-  target = coordinates[1];
+  target = coordinates_inside[1];
   base_index = 0;
   bool l_on_old = true;
   matchcorners = corners_of_cell->coordinates;
@@ -224,10 +223,12 @@ cell_intersection( t8_forest_t forest1, t8_forest_t forest2, t8_cell_corners_t *
     if (is_inside){
       //add corner of old mesh to point cloud
       point_cloud->push_backe(target);
-      //exit for loop and continue with coordinates[1] as base
-      base_index = base_index + 1;
-      base = coordinates[base_index];
-      target = coordinates[base_index+1];
+      //exit for loop and continue with coordinates_inside[1] as base
+      if (base_index<coordinates_inside.size()){
+        base_index = base_index + 1;
+        base = coordinates_inside[base_index];
+        target = coordinates_inside[base_index+1];
+      }
     }
   }
   if (!is_inside){
@@ -253,12 +254,6 @@ cell_intersection( t8_forest_t forest1, t8_forest_t forest2, t8_cell_corners_t *
 
 // cKH: potentially useful functions to determine next member of point cloud
 // t8_forest_element_line_length: distance between two corners
-/* t8_triangle_point_inside: const double p_0[3], const double v[3], const double w[3], const double point[3],
- *                          const double tolerance)
- * \param[in] v           The vector from p_0 to p_1 (second vertex in the triangle)
- * \param[in] w           The vector from p_0 to p_2 (third vertex in the triangle)
-*/
-
 
 //ltree_id in t8_cell_corners_t -> uebergeben
 // qKH: but doesn't "corners" already store the ltree_id value after the callback (for the old forest)?
