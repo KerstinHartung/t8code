@@ -24,6 +24,7 @@
  */
 
 /* TODO: Document this file */
+// qKH and cKH to indicate my questions and comments
 
 #ifndef T8_FOREST_CONSERVATIVE_REMAPPING
 #define T8_FOREST_CONSERVATIVE_REMAPPING
@@ -35,7 +36,7 @@
 
 T8_EXTERN_C_BEGIN ();
 
-/* Search query, a set of points. */
+/* Search query, a set of points. Stores information of new cell and intersecting old cells */
 typedef struct
 { 
   std::vector<double[3]> coordinates;/* The corners of our cell. */
@@ -52,14 +53,14 @@ typedef struct
  * and we count the total number of elements that we constructed during search. */
 typedef struct
 {
-  t8_cell_corners_t *cornerns_per_cell;   /* List of each cell including the corners. */
-  //Liste (Anzahl Zellen Zielgitter) von dynamischen structuren fuer die Zell-IDs des Ursprungsgitters 
-  
+  t8_cell_corners_t *corners_per_cell;   /* List of each cell including the corners. */
+  //Liste (Anzahl Zellen Zielgitter) von dynamischen structuren fuer die Zell-IDs des Ursprungsgitters
+ 
 } t8_search_user_data_t;
 
 /*
  * The search callback.
- * It will be called once per element and generally decides whether or not 
+ * It will be called once per element and generally decides whether or not
  * to continue the search with the children of the element.
  * Since we will continue as long as there are corners left to consider,
  * we always return 1 here.
@@ -109,6 +110,7 @@ t8_tutorial_search_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, cons
       if (is_leaf) {
         t8_locidx_t element_index = t8_forest_get_tree_element_offset (forest, ltreeid) + tree_leaf_index;
         //add index of the cell to 
+        // qKH: what is missing in the above comment?
         corners_of_cell->intersection_cell_indices->push_back( element_index );
         corners_of_cell->intersection_cell_treeid->push_back( ltreeid );
       }
@@ -122,13 +124,74 @@ t8_tutorial_search_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, cons
   }
 }
 
-
+// qKH
+/*
+ * forest1 describes the original grid
+ * forest2 describes the new grid, on which data should be remapped
+ */
+// qKH: I added "corners" as argument, or is this available another way?
 void //rueckgabewert anpassen oder als pointer uebergeben - Punktwolke
-cell_intersection( t8_forest_t forest1, t8_forest_t forest2, t8_element_t *elem1, t8_element_t *elem2 )
+cell_intersection( t8_forest_t forest1, t8_forest_t forest2, sc_array *corners, t8_element_t *elem2 )
 {
-//t8_forest_element_coordinate (t8_forest_t forest, t8_locidx_t ltree_id, const t8_element_t *element, int corner_number,
-//                              double *coordinates)
+  // 
+  //t8_forest_element_coordinate (t8_forest_t forest, t8_locidx_t ltree_id, const t8_element_t *element, int corner_number,     
+  //                              double *coordinates) 
+  // following usage in t8_forest_element_diam
+  t8_eclass_t tree_class;                                                                                                       
+  t8_eclass_scheme_c *ts;
+ 
+  double coordinates[3]; 
+  int num_corners;
+
+  // cKH
+  /* Approach
+   * - start at first corner of forest1 (old) - obtained from search for points
+   * - store this coordinate as first member of point cloud
+   * - check in direction of next corner (pick order randomly): crossing edge of forest2?
+   *    - check by calculating t8_vertex_point_inside between all neighboring corners of forest2
+   *        if next (or do we only have "one of the points"?) point of corners inside => no
+   *    - if yes: the crossing point is next member of point cloud
+             - continue along the edge of elem2 to next corner of elem2
+             - check if corner inside of elem1 (t8_forest_element_point_inside)
+                 - if yes: this is the next member of the point cloud
+                 - if no: go in direction of other boardering corner of elem2, add this to point cloud
+   *    - if no: the next corner of elem1 is the next member of point cloud
+   * - continue either on edge of elem1 or elem2 until next corner and then repeat previous step
+   * - stop when arrived at first corner again
+   * - pass point cloud list 
+   */
+
+  /* cKH: some old stuff
+  tree_class = t8_forest_get_tree_class (forest2, ltreeid);
+  ts = t8_forest_get_eclass_scheme (forest2, tree_class);
+  T8_ASSERT (ts->t8_element_is_valid (elem2));
+  num_corners = ts->t8_element_num_corners (elem2);
+
+  for (i = 0; i < num_corners; i++) {
+    //(t8_forest_t forest,t8_locidx_t ltree_id,const t8_element_t *element,int corner_number,double *coordinates)
+    t8_forest_element_coordinate (forest2, ltreeid, elem2, i, coordinates);
+  }
+  */
+
+  // cKH: alternative approach assuming struct "corners" containing information for one new cell: which 
+  //      old cells are intersected
+  /*
+   - get coordinates of first element of corners_of_cell->intersection_cell_indices and add to point cloud
+   - then follow the steps listed above, always calculate coordinates for new elements 
+   - fill volume_cell (based on t8_forest_element_volume)
+  */
+
+// cKH: potentially useful functions to determine next member of point cloud
+// t8_forest_element_line_length: distance between two corners
+/* t8_triangle_point_inside: const double p_0[3], const double v[3], const double w[3], const double point[3],
+ *                          const double tolerance)
+ * \param[in] v           The vector from p_0 to p_1 (second vertex in the triangle)
+ * \param[in] w           The vector from p_0 to p_2 (third vertex in the triangle)
+*/
+
+
 //ltree_id in t8_cell_corners_t -> uebergeben
+// qKH: but doesn't "corners" already store the ltree_id value after the callback (for the old forest)?
 
 //Eckpunkte des Schnittes zurueckgeben
 
@@ -148,8 +211,18 @@ void
 point_cloud_to_volume( std::vector<double[3]> points )
 {
   // triangulation https://www.kiv.zcu.cz/site/documents/verejne/vyzkum/publikace/technicke-zpravy/2002/tr-2002-02.pdf
+  // qKH: Use pre-existing library like qhull for this? (needs to be available for commerical use)
 }
 
+// qKH
+/*
+ - Is t8_build_corners complete? I guess I am not sure what its purpose is.
+ - A "corners" array is created but never filled? 
+ - "corner" is filled with some indices but not returned from the function? What am I missing?
+ - are num_corners and coordinates filled here (or should be)?
+ - answer: yes, return is missing here
+ - Chiara: set num_corners to "corners" struct here
+ */
 static sc_array *
 t8_build_corners( t8_forest_t forest )
 {
@@ -177,8 +250,29 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
     for (t8_locidx_t ielem_tree = 0; ielem_tree < num_elem; ielem_tree++, ielem++) {
       //2) Zellen des alten Forests suchen, in dem die Eckpunkte der jeweiligen Zelle enthalten sind
       t8_forest_search(forest_old, t8_search_callback, t8_tutorial_search_query_callback, corners );
+      // ( t8_forest_t forest1, t8_forest_t forest2, sc_array *corners, t8_element_t *elem2 )
+      // qKH: does it make sense to have this in one loop or is it possible to access a previous
+      //      ielem in the corners structure? antyhing against merging these associated calls
+      //      which cycle over new forest's elements?
+      // cKH: I changed the arguments here - instead of elem1 (elem of the old forest) the 
+      //      corners information is passed
+      cell_intersection(forest_old, forest_new, corners, ielem_tree)
+      // add volume as output argument
+      point_cloud_to_volume(points, ...)
     }
   }
+  // cKH
+  // the next few lines can probably be integrated in the above nested loop
+  // volume_new_remap = 0 (can this be stored in volume_intersection_cells?)
+  //loop over trees and number of elements of new forest
+      //volume_new = t8_forest_element_volume (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element)
+      //for elements of corners (i.e. old elements that intersect with new forest)
+          // calculate intersection of corners and forest_new elements
+          // calculate volume 
+      // sum volume and check if volume_new_remap = volume_new 
+      // i.e. if volume_cell and volume_intersection_cells are the same?
+
+
       //3) Schnitt der Zellen bilden
 
       //4) Volumen vergleichen
