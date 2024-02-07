@@ -148,6 +148,11 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
   int order_corner_new[] = {0,1,3,2};
   const double tolerance = 1e-8;
   std::vector<double*> point_cloud;
+  bool old_inside, corner_is_inside_element, corner_new_is_inside_element;
+  bool corner_new1_is_inside_element, corner_new2_is_inside_element;
+  bool finding_intersec_fromold, loop_new;
+  int int_ind, forest_old_nr_elem, ncorner, icorner_old, icornnext, icornnow;
+  int icorn_old,icorn_new, direction_new;
 
   // qKH
   /*
@@ -176,27 +181,27 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
 
 
   //number of cells of old forest within new forest element
-  forest_old_nr_elem = corners->intersection_cell_indices.size();
+  forest_old_nr_elem = corner->intersection_cell_indices.size();
   //number of corners of new forest element
-  ncorner         = corners->coordinates.size();
+  ncorner         = corner->coordinates.size();
 
   //todo: add loop over forest_old_nr_elem (independent outside)
-  int_ind = 0  // index to iterate through old elements intersection with one new element
+  int_ind = 0;  // index to iterate through old elements intersection with one new element
 
   //Calculate the corner elements of element of the current old tree
   t8_forest_get_element_nodes(forest_old, corner->intersection_cell_treeid[int_ind],
         corner->intersection_cell_indices[int_ind], coordinates );
   // find which corners/elements of old forest lie within the new element
-  old_inside = false;
+  old_inside = 1;
   // if start not from 0 but from variable => can call this again later as function with updated
   // start index variable
-  icorner_old = 0
-  for (int icorn_old=icorner_old;icorn_old<coordinates.size();icorn_old++)
-  {
+  icorner_old = 0;
+  loop_new = 1;
+  for (icorn_old=icorner_old;icorn_old<coordinates.size();icorn_old++){
      icornnext = order_corner_old[icorn_old];
      corner_is_inside_element =
        t8_forest_element_point_inside (forest_new, treeid_new, elem_new, coordinates[icornnext], tolerance);
-     if (old_inside .and. !corner_is_inside_elemnt){
+     if (old_inside && !corner_is_inside_element){
        old_inside=false;
        // previous one was inside, next one isn't -> look for intersection old and new mesh element
        finding_intersec_fromold=1;
@@ -232,7 +237,7 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
              point_cloud.push(corner->coordinates[order_corner_new[icorn_new+1]]);
              icorn_new++;
              direction_new = 1;
-           }else if (corner_new1_is_inside_element .and. corner_new2_is_inside_element){
+           }else if (corner_new1_is_inside_element && corner_new2_is_inside_element){
              // something went wrong earlier!!
            }
            corner_new_is_inside_element = 1;
@@ -262,16 +267,18 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
          } // if (sizeof(intersect_point)/sizeof(double)==1) 
          if (finding_intersec_fromold){
            icorn_new++;
+           if (icorn_new == corner->coordinates.size()) loop_new = 0;
            // todo check that icorn_new doesn't get too large
          }
          if (!finding_intersec_fromold){
            icornnow  = order_corner_old[icorn_old];
            icorn_old++;
            icornnext = order_corner_old[icorn_old];
+           if (icorn_old == coordinates.size()) loop_new = 0; 
            // todo: add check that icorn_old doesn't get too large
          }
        } // while(loop_new)
-     } // if (old_inside .and. !corner_is_inside_elemnt){
+     } // if (old_inside && !corner_is_inside_element){
      // found corner of old forest in new element
      if (corner_is_inside_element){
        point_cloud.push(coordinates[icornnext]);
@@ -288,7 +295,7 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
 }
 
 void
-t8_next_element(index_in, index_out, direction)
+t8_next_element(int index_in, int index_out, int direction)
 {
   // direction +1 or -1
   // assuming element shape for now
@@ -296,7 +303,7 @@ t8_next_element(index_in, index_out, direction)
   size_t nr = sizeof(order_corners_new)/sizeof(int);
   int index;
   if (direction==1){
-    for (index=0, index<nr, index++){
+    for (index=0; index<nr; index++){
       if (index==index_in){
         // if last element in round
         if ((index+1)==nr){
@@ -306,8 +313,8 @@ t8_next_element(index_in, index_out, direction)
         }
       }
     }
-  }else if(direction=-1){
-    for (index=nr, index>0, index-=1){
+  }else if(direction==-1){
+    for (index=nr; index>0; index-=1){
       if (index==index_in){
         // if first element in round
         if ((index-1)==0){
@@ -320,8 +327,9 @@ t8_next_element(index_in, index_out, direction)
   }
 }
 
-static std::vector<t8_locidx_t>
-t8_vec_segxseg(const double vec_a[3]; const double vec_b[3]; const double vec_c[3]; const double vec_d[3]; double tol)
+//static std::vector<t8_locidx_t>*
+double
+t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[3], const double vec_d[3], double tol)
 {
   /*
    From Zoltan Csati for Matlab,  21/11/2018
@@ -354,7 +362,7 @@ t8_vec_segxseg(const double vec_a[3]; const double vec_b[3]; const double vec_c[
   */
    double  s, t;       /* The two parameters of the parametric eqns. */
    double num, denom;  /* Numerator and denoninator of equations. */
-   std::vector<t8_locidx_t> *P;
+   double P[2];
    //char code = '?';    /* Return char characterizing intersection. */
    int X, Y;
 
@@ -365,7 +373,7 @@ t8_vec_segxseg(const double vec_a[3]; const double vec_b[3]; const double vec_c[
            vec_d[X] * (double)( vec_b[Y] - vec_a[Y] ) +
            vec_c[X] * (double)( vec_a[Y] - vec_b[Y] );
    /* If denom is zero, then segments are parallel: handle separately. */
-   if (denom < tol)  return  ParallelInt(vec_a, vec_b, vec_c, vec_d, P);
+   //if (denom < tol)  return  ParallelInt(vec_a, vec_b, vec_c, vec_d, P);
    
    num =    vec_a[X] * (double)( vec_d[Y] - vec_c[Y] ) +
             vec_c[X] * (double)( vec_a[Y] - vec_d[Y] ) +
@@ -459,17 +467,16 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
       // cKH: I changed the arguments here - instead of elem1 (elem of the old forest) the
       //      corners information is passed (or one element of corners)
       //3) Schnitt der Zellen bilden
-      cell_intersection(forest_old, forest_new, corner, ielem, itree)
+      cell_intersection(forest_old, forest_new, corner, ielem, itree);
       // add volume as output argument
-      point_cloud_to_volume(points, ...)
+      //point_cloud_to_volume(points, ...);
     }
   }
 
   // cKH
   // the next few lines can probably be integrated in the above nested loop
   // volume_new_remap = 0 (can this be stored in volume_intersection_cells?)
-  //loop over trees and number of elements of new forest
-      //volume_new = t8_forest_element_volume (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element)
+  //loop over trees and number of elements of new forest     //volume_new = t8_forest_element_volume (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element)
       //for elements of corners (i.e. old elements that intersect with new forest)
           // calculate intersection of corners and forest_new elements
           // calculate volume
