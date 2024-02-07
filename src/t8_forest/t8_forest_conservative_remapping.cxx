@@ -142,7 +142,7 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
         t8_element_t *elem_new, t8_locidx_t treeid_new )
 {
   // information about old forest
-  double coordinates[3];
+  std::vector<double[3]> coordinates;
   // todo update to variable number of corners
   int order_corner_old[] = {0,1,3,2};
   int order_corner_new[] = {0,1,3,2};
@@ -153,6 +153,7 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
   bool finding_intersec_fromold, loop_new;
   int int_ind, forest_old_nr_elem, ncorner, icorner_old, icornnext, icornnow;
   int icorn_old,icorn_new, direction_new;
+  double intersect_point;
 
   // qKH
   /*
