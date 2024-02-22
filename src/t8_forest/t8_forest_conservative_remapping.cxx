@@ -32,6 +32,7 @@
 #include <t8_forest/t8_forest_general.h>
 #include <t8_forest/t8_forest_geometrical.h>
 #include <t8_forest/t8_forest_iterate.h>
+#include <t8_forest/t8_forest_private.h>
 #include <t8_element_cxx.hxx>
 #include <vector>
 
@@ -41,8 +42,8 @@ T8_EXTERN_C_BEGIN ();
 typedef struct
 {
   std::vector<double*> coordinates;/* The corners of our cell. */
-  std::vector<t8_locidx_t> *intersection_cell_indices;
-  std::vector<t8_locidx_t> *intersection_cell_treeid;
+  std::vector<t8_locidx_t> intersection_cell_indices;
+  std::vector<t8_locidx_t> intersection_cell_treeid;
   double volume_cell;
   double volume_intersection_cells;
 
@@ -117,15 +118,15 @@ t8_tutorial_search_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, cons
   /* Numerical tolerance for the is_inside_element check. */
   const double tolerance = 1e-8;
 
-  for( int icorner = 0; icorner < corners_of_cell->coordinates.size(); icorner++ )
+  for(std::vector<double*>::size_type icorner = 0; icorner < corners_of_cell->coordinates.size(); icorner++ )
   {
     corner_is_inside_element = t8_forest_element_point_inside (forest, ltreeid, element, corners_of_cell->coordinates[icorner], tolerance);
     if (corner_is_inside_element) {
       if (is_leaf) {
         t8_locidx_t element_index = t8_forest_get_tree_element_offset (forest, ltreeid) + tree_leaf_index;
         //add index of the cell to
-        corners_of_cell->intersection_cell_indices->push_back( element_index );
-        corners_of_cell->intersection_cell_treeid->push_back( ltreeid );
+        corners_of_cell->intersection_cell_indices.push_back( element_index );
+        corners_of_cell->intersection_cell_treeid.push_back( ltreeid );
       }
       /* The particles is inside the element. This query should remain active.
        * If this element is not a leaf the search will continue with its children. */
@@ -137,200 +138,11 @@ t8_tutorial_search_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, cons
   }
 }
 
-void //rueckgabewert anpassen oder als pointer uebergeben - Punktwolke
-cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corners_t *corner,
-        t8_element_t *elem_new, t8_locidx_t treeid_new )
-{
-  // information about old forest
-  std::vector<double[3]> coordinates;
-  // todo update to variable number of corners
-  int order_corner_old[] = {0,1,3,2};
-  int order_corner_new[] = {0,1,3,2};
-  const double tolerance = 1e-8;
-  std::vector<double*> point_cloud;
-  bool old_inside, corner_is_inside_element, corner_new_is_inside_element;
-  bool corner_new1_is_inside_element, corner_new2_is_inside_element;
-  bool finding_intersec_fromold, loop_new;
-  int int_ind, forest_old_nr_elem, ncorner, icorner_old, icornnext, icornnow;
-  int icorn_old,icorn_new, direction_new;
-  double intersect_point;
-
-  // qKH
-  /*
-    - why is the number of corners equal to coordinates.size()?
-   */
-
-
-  // cKH
-  /* Approach
-   * - start at first corner of forest_old
-   * - iterate over corners and check if inside of new element
-   *   - if yes: add to point_cloud and continue with next forest_old element's corner
-   *   - if  no (and already found one point inside): look for cross section point between new and old element
-   *      - iterate over corners of new element untill cross section found
-   *      - add cross section point to point_cloud
-   *      - check in which direction next point of new forest element of old element
-   *      - check for further corners of new element in old element and add to point cloud
-   *      - once no longer inside of old element: revert cross section point check (i.e.
-   *        cycle through old element corners until intersection with current new element corners found)
-   *   - if  no: continue
-   * - stop when arrived at first corner again
-   * - pass point cloud list
-   * - fill volume_cell (based on t8_forest_element_volume)
-   * - add check for parallel orientation
-  */
-
-
-  //number of cells of old forest within new forest element
-  forest_old_nr_elem = corner->intersection_cell_indices.size();
-  //number of corners of new forest element
-  ncorner         = corner->coordinates.size();
-
-  //todo: add loop over forest_old_nr_elem (independent outside)
-  int_ind = 0;  // index to iterate through old elements intersection with one new element
-
-  //Calculate the corner elements of element of the current old tree
-  t8_forest_get_element_nodes(forest_old, corner->intersection_cell_treeid[int_ind],
-        corner->intersection_cell_indices[int_ind], coordinates );
-  // find which corners/elements of old forest lie within the new element
-  old_inside = 1;
-  // if start not from 0 but from variable => can call this again later as function with updated
-  // start index variable
-  icorner_old = 0;
-  loop_new = 1;
-  for (icorn_old=icorner_old;icorn_old<coordinates.size();icorn_old++){
-     icornnext = order_corner_old[icorn_old];
-     corner_is_inside_element =
-       t8_forest_element_point_inside (forest_new, treeid_new, elem_new, coordinates[icornnext], tolerance);
-     if (old_inside && !corner_is_inside_element){
-       old_inside=false;
-       // previous one was inside, next one isn't -> look for intersection old and new mesh element
-       finding_intersec_fromold=1;
-       direction_new=1;
-       icornnow=order_corner_old[icorn_old-1];
-       while(loop_new){
-         // find intersection between two neighboring points in old and new grid
-         intersect_point = t8_vec_segxseg(coordinates[icornnow], coordinates[icornnext],
-            corner->coordinates[order_corner_new[icorn_new]], corner->coordinates[order_corner_new[icorn_new+1]],
-            tolerance);
-         // check if two edges intersect in exactly one point
-         if (sizeof(intersect_point)/sizeof(double)==1){
-           // add intersection to list of points
-           point_cloud.push(intersect_point);
-           // check in which direction next new corner is in old element
-           // is it even possible that the direction will be changed????
-           // qKH: is treeid and cell_index from corner used correctlz here?
-           corner_new1_is_inside_element =
-            t8_forest_element_point_inside (forest_old, corner->intersection_cell_treeid[int_ind], 
-                corner->intersection_cell_indices[int_ind],
-                corner->coordinates[order_corner_new[icorn_new]], tolerance);
-           corner_new2_is_inside_element =
-            t8_forest_element_point_inside (forest_old, corner->intersection_cell_treeid[int_ind],
-                corner->intersection_cell_indices[int_ind],
-                corner->coordinates[order_corner_new[icorn_new+1]], tolerance);
-           // in one direction should be inside of old element -> add that corner to point cloud
-           // this "inside point" determines the order in which to search for next "inside points"
-           if (corner_new1_is_inside_element){
-             point_cloud.push(corner->coordinates[order_corner_new[icorn_new]]);
-             direction_new = -1;
-             // qKH: can this even occur? is the the order not always staying constant between elements?
-           }else if(corner_new2_is_inside_element){
-             point_cloud.push(corner->coordinates[order_corner_new[icorn_new+1]]);
-             icorn_new++;
-             direction_new = 1;
-           }else if (corner_new1_is_inside_element && corner_new2_is_inside_element){
-             // something went wrong earlier!!
-           }
-           corner_new_is_inside_element = 1;
-           // finding more corners of new forest inside of old element (if present)
-           while (corner_new_is_inside_element){
-             icorn_new++;
-             if (direction_new==-1){
-               icorn_new-=2;
-             }
-             // is there another new corner in old element?
-             corner_new_is_inside_element = 
-               t8_forest_element_point_inside (forest_old, corner->intersection_cell_treeid[int_ind],
-                  corner->intersection_cell_indices[int_ind],
-                  corner->coordinates[order_corner_new[icorn_new]], tolerance);
-             if(corner_new_is_inside_element){
-               point_cloud.push(corner->coordinates[order_corner_new[icorn_new]])
-             }else{
-               corner_new_is_inside_element = 0;
-               // resetting indices if no more "inside points" found
-               icorn_new-=1;
-               if (direction_new==-1){
-                 icorn_new+=2;
-               }
-             }
-           } // while (corner_new_is_inside_element)
-           finding_intersec_fromold=0;
-         } // if (sizeof(intersect_point)/sizeof(double)==1) 
-         if (finding_intersec_fromold){
-           icorn_new++;
-           if (icorn_new == corner->coordinates.size()) loop_new = 0;
-           // todo check that icorn_new doesn't get too large
-         }
-         if (!finding_intersec_fromold){
-           icornnow  = order_corner_old[icorn_old];
-           icorn_old++;
-           icornnext = order_corner_old[icorn_old];
-           if (icorn_old == coordinates.size()) loop_new = 0; 
-           // todo: add check that icorn_old doesn't get too large
-         }
-       } // while(loop_new)
-     } // if (old_inside && !corner_is_inside_element){
-     // found corner of old forest in new element
-     if (corner_is_inside_element){
-       point_cloud.push(coordinates[icornnext]);
-       old_inside=true;
-     }
-  }
-  // Add check to see if just all old element corners within new element? 
-
-//ltree_id in t8_cell_corners_t -> uebergeben
-// qKH: but doesn't "corners" already store the ltree_id value after the callback (for the old forest)?
-
-//Eckpunkte des Schnittes zurueckgeben
-
-}
-
-void
-t8_next_element(int index_in, int index_out, int direction)
-{
-  // direction +1 or -1
-  // assuming element shape for now
-  int order_corners_new[] = {0,1,3,2};
-  size_t nr = sizeof(order_corners_new)/sizeof(int);
-  int index;
-  if (direction==1){
-    for (index=0; index<nr; index++){
-      if (index==index_in){
-        // if last element in round
-        if ((index+1)==nr){
-          index_out = order_corners_new[0];
-        }else{
-          index_out = order_corners_new[index_in+1];
-        }
-      }
-    }
-  }else if(direction==-1){
-    for (index=nr; index>0; index-=1){
-      if (index==index_in){
-        // if first element in round
-        if ((index-1)==0){
-          index_out = order_corners_new[nr];
-        }else{
-          index_out = order_corners_new[index_in-1];
-        }
-      }
-    }
-  }
-}
-
 //static std::vector<t8_locidx_t>*
-double
-t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[3], const double vec_d[3], double tol)
+//std::vector<double>
+//double
+void
+t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[3], const double vec_d[3], double tol, double P[3])
 {
   /*
    From Zoltan Csati for Matlab,  21/11/2018
@@ -340,7 +152,7 @@ t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[
    [vec_e]: the segments intersect in one point
    [vec_e, vec_f]: if the segments overlap
 
-   From https://github.com/w8r/orourke-compc/blob/master/segseg/segseg.c 
+   From https://github.com/w8r/orourke-compc/blob/master/segseg/segseg.c
    ---------------------------------------------------------------------
    SegSegInt: Finds the point of intersection p between two closed
    segments ab and cd.  Returns p and a char with the following meaning:
@@ -363,7 +175,8 @@ t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[
   */
    double  s, t;       /* The two parameters of the parametric eqns. */
    double num, denom;  /* Numerator and denoninator of equations. */
-   double P[2];
+   //std::vector<double> P[2];
+   //double P[2];
    //char code = '?';    /* Return char characterizing intersection. */
    int X, Y;
 
@@ -375,7 +188,7 @@ t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[
            vec_c[X] * (double)( vec_a[Y] - vec_b[Y] );
    /* If denom is zero, then segments are parallel: handle separately. */
    //if (denom < tol)  return  ParallelInt(vec_a, vec_b, vec_c, vec_d, P);
-   
+
    num =    vec_a[X] * (double)( vec_d[Y] - vec_c[Y] ) +
             vec_c[X] * (double)( vec_a[Y] - vec_d[Y] ) +
             vec_d[X] * (double)( vec_c[Y] - vec_a[Y] );
@@ -402,7 +215,231 @@ t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[
      P[Y] = vec_a[Y] + s * ( vec_b[Y] - vec_a[Y] );
    }
 
-   return P;
+   //return P;
+}
+
+void //rueckgabewert anpassen oder als pointer uebergeben - Punktwolke
+cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corners_t *corner,
+        const t8_element_t *elem_new, t8_locidx_t treeid_new )
+{
+  // information about old forest
+  std::vector<double*> coordinates;
+  // todo update to variable number of corners
+  int order_corner_old[] = {0,1,3,2};
+  int order_corner_new[] = {0,1,3,2};
+  const double tolerance = 1e-8;
+  std::vector<double*> point_cloud;
+  bool old_inside, corner_is_inside_element, corner_new_is_inside_element;
+  bool corner_new1_is_inside_element, corner_new2_is_inside_element;
+  bool finding_intersec_fromold, loop_new;
+  //t8_locidx_t int_ind;
+  int int_ind;
+  int forest_old_nr_elem, ncorner, icorner_old, icornnext, icorn_o1;
+  int icorn_o0,icorn_n0, direction_new,icorn_old, icorn_new;
+  double intersect_point[3];
+
+  // qKH
+  /*
+    - why is the number of corners equal to coordinates.size()?
+   */
+
+
+  /* todo
+   - add outer loop over all old elements with at least one corner inside
+   - before I implement the next point: check with Chiara that I understand
+     tolerance of "finding point inside" correctly, i.e. finding points on the
+     face of new element
+   - add case check (and thus return char for test): if points are "inside"
+     but in reality sharing a segment then can either have after an "e" intersect
+     a) next one outside or b) next one inside, in case a) abort since not a true
+    "inside" element
+  */
+
+  // cKH
+  /* Approach
+   * - start at first corner of forest_old
+   * - iterate over corners and check if inside of new element
+   *   - if yes: add to point_cloud and continue with next forest_old element's corner
+   *   - if  no (and already found one point inside): look for cross section point between new and old element
+   *      - iterate over corners of new element untill cross section found
+   *      - add cross section point to point_cloud
+   *      - check in which direction next point of new forest element of old element
+   *      - check for further corners of new element in old element and add to point cloud
+   *      - once no longer inside of old element: revert cross section point check (i.e.
+   *        cycle through old element corners until intersection with current new element corners found)
+   *   - if  no: continue
+   * - stop when arrived at first corner again
+   * - pass point cloud list
+   * - fill volume_cell (based on t8_forest_element_volume)
+   * - add check for parallel orientation
+  */
+
+
+  //number of cells of old forest within new forest element
+  // qKH: why not .size()? here?
+  forest_old_nr_elem = corner->intersection_cell_indices.size();
+  //number of corners of new forest element
+  ncorner         = corner->coordinates.size();
+
+  //todo: add loop over forest_old_nr_elem (independent outside)
+  int_ind = 0;  // index to iterate through old elements intersection with one new element
+
+
+  //corner->intersection_cell_treeid[int_ind];
+
+  //Calculate the corner elements of element of the current old tree
+  t8_locidx_t ltree = corner->intersection_cell_treeid[int_ind];
+  t8_locidx_t element_index = corner->intersection_cell_indices[int_ind];
+  t8_tree_t tree = t8_forest_get_tree(forest_old, ltree);
+  t8_element_t* element = t8_forest_get_tree_element(tree, element_index);
+  t8_forest_get_element_nodes(forest_old, ltree, element, coordinates);
+  //t8_forest_get_element_nodes(forest_old, corner->intersection_cell_treeid[int_ind],
+  //       corner->intersection_cell_indices[int_ind], coordinates );
+  //t8_forest_get_element_nodes(forest_old, (t8_locidx_t*) corner->intersection_cell_treeid[int_ind],
+  //      (t8_element_t*) corner->intersection_cell_indices[int_ind], coordinates );
+  // find which corners/elements of old forest lie within the new element
+  //qKH: do we need this, i.e. might this happend several times? otherwise can just
+  //     check length of point_inside/=0
+  old_inside = 1;
+  // if start not from 0 but from variable => can call this again later as function with updated
+  // start index variable
+  icorner_old = 0;
+  loop_new = 1;
+  for (icorn_old=icorner_old;icorn_old< (int) coordinates.size();icorn_old++){
+     icorn_o1 = order_corner_old[icorn_old];
+     corner_is_inside_element =
+       t8_forest_element_point_inside (forest_new, treeid_new, elem_new, coordinates[icorn_o1], tolerance);
+     if (old_inside && !corner_is_inside_element){
+       old_inside=false;
+       // previous one was inside, next one isn't -> look for intersection old and new mesh element
+       // first: check from old->new
+       finding_intersec_fromold=1;
+       // direction check is maybe not required
+       direction_new=1;
+       icorn_o0 = order_corner_old[icorn_old-1];
+       while(loop_new){
+         // find intersection between two neighboring points in old and new grid
+         t8_vec_segxseg(coordinates[icorn_o0], coordinates[icorn_o1],
+            corner->coordinates[order_corner_new[icorn_new]], corner->coordinates[order_corner_new[icorn_new+1]],
+            tolerance, intersect_point);
+         // check if two edges intersect in exactly one point
+         if (sizeof(intersect_point)/sizeof(double)==1){
+           // add intersection to list of points
+           point_cloud.push_back(intersect_point);
+           // check in which direction next new corner is in old element
+           // is it even possible that the direction will be changed????
+           // qKH: is treeid and cell_index from corner used correctly here?
+           t8_locidx_t element_index = corner->intersection_cell_indices[int_ind];
+           t8_tree_t tree = t8_forest_get_tree(forest_old, corner->intersection_cell_treeid[int_ind]);
+           t8_element_t* element = t8_forest_get_tree_element(tree, element_index);
+           corner_new1_is_inside_element =
+            t8_forest_element_point_inside (forest_old, (t8_locidx_t) corner->intersection_cell_treeid[int_ind],
+                element,
+                corner->coordinates[order_corner_new[icorn_new]], tolerance);
+           corner_new2_is_inside_element =
+            t8_forest_element_point_inside (forest_old, (t8_locidx_t) corner->intersection_cell_treeid[int_ind],
+                element,
+                corner->coordinates[order_corner_new[icorn_new+1]], tolerance);
+           // in one direction should be inside of old element -> add that corner to point cloud
+           // this "inside point" determines the order in which to search for next "inside points"
+           if (corner_new1_is_inside_element){
+             point_cloud.push_back(corner->coordinates[order_corner_new[icorn_new]]);
+             direction_new = -1;
+             // qKH: can this even occur? is the the order not always staying constant between elements?
+           }else if(corner_new2_is_inside_element){
+             point_cloud.push_back(corner->coordinates[order_corner_new[icorn_new+1]]);
+             icorn_new++;
+             direction_new = 1;
+           }else if (corner_new1_is_inside_element && corner_new2_is_inside_element){
+             // something went wrong earlier!!
+           }
+           corner_new_is_inside_element = 1;
+           // finding more corners of new forest inside of old element (if present)
+           while (corner_new_is_inside_element){
+             icorn_new++;
+             if (direction_new==-1){
+               icorn_new-=2;
+             }
+             // is there another new corner in old element?
+             corner_new_is_inside_element =
+               t8_forest_element_point_inside (forest_old, corner->intersection_cell_treeid[int_ind],
+                  element,
+                  corner->coordinates[order_corner_new[icorn_new]], tolerance);
+             if(corner_new_is_inside_element){
+               //qkh:  error: no matching function for call to ‘std::vector<double [3]>::push_back(double*&)
+               //point_cloud->push_back(corner->coordinates[order_corner_new[icorn_new]]);
+             }else{
+               corner_new_is_inside_element = 0;
+               // resetting indices if no more "inside points" found
+               icorn_new-=1;
+               if (direction_new==-1){
+                 icorn_new+=2;
+               }
+             }
+           } // while (corner_new_is_inside_element)
+           // now are inside new, so check new->old
+           finding_intersec_fromold=0;
+         } // if (sizeof(intersect_point)/sizeof(double)==1)
+         if (finding_intersec_fromold){
+           icorn_new++;
+           if ((std::vector<double*>::size_type) icorn_new == corner->coordinates.size()) loop_new = 0;
+           // todo check that icorn_new doesn't get too large
+         }
+         if (!finding_intersec_fromold){
+           icorn_o0  = order_corner_old[icorn_old];
+           icorn_old++;
+           icornnext = order_corner_old[icorn_old];
+           if ((std::vector<double*>::size_type) icorn_old == coordinates.size()) loop_new = 0;
+           // todo: add check that icorn_old doesn't get too large
+         }
+       } // while(loop_new)
+     } // if (old_inside && !corner_is_inside_element){
+     // found corner of old forest in new element
+     if (corner_is_inside_element){
+       point_cloud.push_back(coordinates[icorn_o1]);
+       old_inside=true;
+     }
+  }
+  // Add check to see if just all old element corners within new element?
+
+//ltree_id in t8_cell_corners_t -> uebergeben
+// qKH: but doesn't "corners" already store the ltree_id value after the callback (for the old forest)?
+
+//Eckpunkte des Schnittes zurueckgeben
+
+}
+
+void
+t8_next_element(int index_in, int index_out, int direction)
+{
+  // direction +1 or -1
+  // assuming element shape for now
+  int order_corners_new[] = {0,1,3,2};
+  size_t nr = sizeof(order_corners_new)/sizeof(int);
+  int index;
+  if (direction==1){
+    for (index=0; index<(int) nr; index++){
+      if (index==index_in){
+        // if last element in round
+        if ((index+1)==(int) nr){
+          index_out = order_corners_new[0];
+        }else{
+          index_out = order_corners_new[index_in+1];
+        }
+      }
+    }
+  }else if(direction==-1){
+    for (index=nr; index>0; index-=1){
+      if (index==index_in){
+        // if first element in round
+        if ((index-1)==0){
+          index_out = order_corners_new[nr];
+        }else{
+          index_out = order_corners_new[index_in-1];
+        }
+      }
+    }
+  }
 }
 
 /*
@@ -451,6 +488,7 @@ void
 t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t forest_new )
 {
   int ielem;
+  t8_element_t *ielem_t;
   t8_locidx_t itree;
   sc_array *corners = t8_build_corners(forest_new);
   //0) Fill structure corners with relevant information (i.e. cells of old forest which contain corners
@@ -462,13 +500,15 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
     const t8_locidx_t num_elem = t8_forest_get_tree_num_elements (forest_new, itree);
     /* Inner loop: Iteration over the elements of the local tree */
     for (t8_locidx_t ielem_tree = 0; ielem_tree < num_elem; ielem_tree++, ielem++) {
-      t8_cell_corners_t *corner
+      t8_cell_corners_t* corner
         = (t8_cell_corners_t *) sc_array_index_int (corners, ielem);
       // ( t8_forest_t forest1, t8_forest_t forest2, sc_array *corners, t8_element_t *elem2 )
       // cKH: I changed the arguments here - instead of elem1 (elem of the old forest) the
       //      corners information is passed (or one element of corners)
       //3) Schnitt der Zellen bilden
-      cell_intersection(forest_old, forest_new, corner, ielem, itree);
+      //ielem_t = (t8_element_t *) ielem;
+      ielem_t = (t8_element_t *)  sc_array_index (corners, ielem);
+      cell_intersection(forest_old, forest_new, corner, ielem_t, itree);
       // add volume as output argument
       //point_cloud_to_volume(points, ...);
     }
