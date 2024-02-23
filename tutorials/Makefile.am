@@ -15,7 +15,7 @@ bin_PROGRAMS += \
 	tutorials/general/t8_tutorial_build_cmesh \
 	tutorials/general/t8_tutorial_search \
 	tutorials/features/t8_features_curved_meshes \
-        tutorial/features/t8_features_conservative_remapping
+        tutorials/features/t8_features_conservative_remapping
 
 dist_t8data_DATA += \
   tutorials/features/t8_features_curved_meshes_generate_cmesh_hex.geo \
@@ -60,7 +60,7 @@ tutorials_general_t8_tutorial_search_SOURCES = \
 	tutorials/general/t8_step3_adapt_forest.cxx
 tutorials_features_t8_features_curved_meshes_SOURCES = \
   tutorials/features/t8_features_curved_meshes.cxx
-tutorial_features_t8_features_conservative_remapping_SOURCES = \
+tutorials_features_t8_features_conservative_remapping_SOURCES = \
   tutorials/features/t8_features_conservative_remapping.cxx
 
 libt8_installed_headers += \
