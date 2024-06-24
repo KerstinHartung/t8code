@@ -36,6 +36,7 @@
 #include <t8_element_cxx.hxx>
 #include <vector>
 
+
 T8_EXTERN_C_BEGIN ();
 
 void
@@ -47,7 +48,7 @@ typedef struct
   /* assumption: element shape is globally constant */
   t8_element_shape_t element_shape_new;
   t8_element_shape_t element_shape_old;
-  std::vector<double*> coordinates;/* The corners of our cell. */
+  std::vector<double*> coordinates ;/* The corners of our cell. */
   std::vector<t8_locidx_t> *intersection_cell_indices;
   std::vector<t8_locidx_t> *intersection_cell_treeid;
   double volume_cell;
@@ -65,6 +66,7 @@ const double
         { 0 }, { 1 }, { 3 }, { 2 } },
       { /* T8_ECLASS_TRIANGLE */
         { 0 }, { 1 }, { 2 } } };
+
 /* Additional user data that we process during search.
  * For each element we count the number of particles that it contains
  * and we count the total number of elements that we constructed during search. */
@@ -84,21 +86,13 @@ t8_forest_get_element_nodes (t8_forest_t forest, t8_locidx_t ltreeid, const t8_e
   element_shape = scheme->t8_element_shape (element);
   int num_corner = t8_eclass_num_vertices[element_shape];
   out_coords.reserve(num_corner);
-  /*
-   Thread 1 "t8_features_con" received signal SIGSEGV, Segmentation fault.
-   0x00005555555d3105 in t8_geom_triangular_interpolation (coefficients=0x7fffffffe0d0, corner_values=0x5555557c0810, corner_value_dim=3, interpolation_dim=2,
-   evaluated_function=0x0) at ../src/t8_geometry/t8_geometry_helpers.c:77
-      evaluated_function[i_dim] = temp[i_dim];
-  */
   //double local[3];
-  /*
-     [libsc 0] Abort: Assertion 'i >= 0 && (size_t) i < array->elem_count'
-     [libsc 0] Abort: ../sc/src/sc_containers.h:497
-   */
-  //static std::vector<double *> out_coords = [](){ std::vector<double*> out_coords; out_coords.reserve(3); return out_coords; }();
+  // element_shape -> use num_corner
   for( size_t icorner = 0; icorner < num_corner; icorner++ )
   {
     const double *ref_coords = t8_element_corner_ref_coords[element_shape][icorner];
+    double local[3] = {0,0,0};
+    out_coords[icorner] = local;
     t8_forest_element_from_ref_coords (forest, ltreeid, element, ref_coords, 1, out_coords[icorner], NULL );
     //t8_forest_element_from_ref_coords (forest, ltreeid, element, ref_coords, 1, local, NULL);
     //out_coords.push_back(local);
@@ -115,7 +109,7 @@ t8_forest_get_element_nodes (t8_forest_t forest, t8_locidx_t ltreeid, const t8_e
  * could be in this element) or the element is a leaf element.
  */
 static int
-t8_search_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element, const int is_leaf,
+t8_search_element_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element, const int is_leaf,
                              t8_element_array_t *leaf_elements, t8_locidx_t tree_leaf_index, void *query,
                              size_t query_index)
 {
@@ -123,7 +117,9 @@ t8_search_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t 
 
   /* Get a pointer to our user data. */
   t8_search_user_data_t *user_data = (t8_search_user_data_t *) t8_forest_get_user_data (forest);
-  T8_ASSERT (user_data != NULL);
+  //todo
+  // enable assertion of user data again
+  //T8_ASSERT (user_data != NULL);
   return 1;
 }
 
@@ -139,13 +135,13 @@ t8_search_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t 
  * These counters are provided in an sc_array as user data of the input forest.
  */
 static int
-t8_tutorial_search_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element,
+t8_search_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element,
                                    const int is_leaf, t8_element_array_t *leaf_elements, t8_locidx_t tree_leaf_index,
                                    void *query, size_t query_index)
 {
   int corner_is_inside_element;
   t8_cell_corners_t *corners_of_cell = (t8_cell_corners_t *) query;
-  //T8_ASSERT (user_data != NULL);
+ // T8_ASSERT (user_data != NULL);
   T8_ASSERT (query != NULL);
   /* Numerical tolerance for the is_inside_element check. */
   const double tolerance = 1e-8;
@@ -271,9 +267,6 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
 
   /* todo
    - add outer loop over all old elements with at least one corner inside
-   - before I implement the next point: check with Chiara that I understand
-     tolerance of "finding point inside" correctly, i.e. finding points on the
-     face of new element
    - add case check (and thus return char for test): if points are "inside"
      but in reality sharing a segment then can either have after an "e" intersect
      a) next one outside or b) next one inside, in case a) abort since not a true
@@ -304,6 +297,11 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
 
   //todo: add loop over forest_old_nr_elem (independent outside)
   int_ind = 0;  // index to iterate through old elements intersection with one new element
+  //todo: need to set up point_cloud with index storing which element
+  //      of old forest is curently handled, so that find associated volume and value 
+  //      also store volume of this element there 
+  //      when calculating volume can add all compontens together and build array
+  //      of new elements and their user_data
 
   //Calculate the corner elements of element of the current old tree
   // add to function t8_build_corners_elem
@@ -319,12 +317,19 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
   // find which corners/elements of old forest lie within the new element
   //qKH: do we need this, i.e. might this happen several times? otherwise can just
   //     check length of point_inside/=0
-  old_inside = 1;
+  old_inside = 0;
   search_cross = 1;
   // if start not from 0 but from variable => can call this again later as function with updated
   // start index variable
   icorner_old = 0;
   // need cycling through to icorner_old again?
+  // yes, probably - because start search only truly from corner which is inside, that might be the 
+  // the first element but then old_inside still TRUE
+  // check if 2D or 3D
+  is_3D = 0;
+  if (t8_get_eclass_scheme[corner->element_shape_old]){
+     
+  }
   for (icorn_old=icorner_old;icorn_old< (int) t8_eclass_num_vertices[corner->element_shape_old];icorn_old++){
     icorn_old_cur = t8_element_corner_order_2D[corner->element_shape_old][icorn_old];
     corner_is_inside_element =
@@ -436,8 +441,14 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
     } // if (old_inside && !corner_is_inside_element){
     // found corner of old forest in new element
     if (corner_is_inside_element){
-      point_cloud.push_back(coordinates[icorn_old_cur]);
-      old_inside=true;
+      // if not first corner check that on same level
+      if (is_3D){
+        search_z = coordinates[icorn_old_cur][2];
+      }
+      if (search_z == coordinates[icorn_old_cur]){
+        point_cloud.push_back(coordinates[icorn_old_cur]);
+        old_inside=1;
+      }
     }
   }
   // Add check to see if just all old element corners within new element?
@@ -482,39 +493,6 @@ t8_next_element(int index_in, int index_out, int direction, t8_element_shape_t e
   }
 }
 
-//void
-//t8_next_element(int index_in, int index_out, int direction)
-//{
-//  // direction +1 or -1
-//  // assuming element shape for now
-//  int order_corners_new[] = {0,1,3,2};
-//  size_t nr = sizeof(order_corners_new)/sizeof(int);
-//  int index;
-//  if (direction==1){
-//    for (index=0; index<(int) nr; index++){
-//      if (index==index_in){
-//        // if last element in round
-//        if ((index+1)==(int) nr){
-//          index_out = order_corners_new[0];
-//        }else{
-//          index_out = order_corners_new[index_in+1];
-//        }
-//      }
-//    }
-//  }else if(direction==-1){
-//    for (index=nr; index>0; index-=1){
-//      if (index==index_in){
-//        // if first element in round
-//        if ((index-1)==0){
-//          index_out = order_corners_new[nr];
-//        }else{
-//          index_out = order_corners_new[index_in-1];
-//        }
-//      }
-//    }
-//  }
-//}
-
 /*
  *  if ( (num == 0.0) || (num == denom) ) code = 'v';
    s = num / denom;
@@ -540,6 +518,7 @@ t8_build_corners( t8_forest_t forest )
   int ielem;
   t8_locidx_t itree;
   sc_array *corners = sc_array_new_count (sizeof (t8_cell_corners_t), t8_forest_get_global_num_elements( forest ));
+  std::cout << t8_forest_get_num_local_trees (forest) <<"  "<<t8_forest_get_global_num_elements( forest )<<std::endl;
   for (itree = 0, ielem = 0; itree < t8_forest_get_num_local_trees (forest); itree++) {
     const t8_locidx_t num_elem = t8_forest_get_tree_num_elements (forest, itree);
     /* Inner loop: Iteration over the elements of the local tree */
@@ -547,11 +526,11 @@ t8_build_corners( t8_forest_t forest )
     //cKH: Returns a pointer to an array element indexed by a plain int. (note on sc_array_index_int)
       t8_cell_corners_t *corner
         = (t8_cell_corners_t *) sc_array_index_int (corners, ielem);
-      auto element = t8_forest_get_element ( forest, ielem_tree, &itree);
-
+      t8_locidx_t looptree=itree;
+      auto element = t8_forest_get_element ( forest, ielem_tree, &looptree);
       //Calculate the corner elements of an element
-      t8_forest_get_element_nodes(forest, itree, element, corner->coordinates, corner->element_shape_new );
-      corner->volume_cell = t8_forest_element_volume( forest, itree, element );
+      t8_forest_get_element_nodes(forest, looptree, element, corner->coordinates, corner->element_shape_new );
+      corner->volume_cell = t8_forest_element_volume( forest, looptree, element );
     }
   }
   return corners;
@@ -563,12 +542,16 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
   int ielem;
   t8_element_t *ielem_t;
   t8_locidx_t itree;
-  sc_array *corners = t8_build_corners(forest_new);
-  //0) Fill structure corners with relevant information (i.e. cells of old forest which contain corners
-  //   of new forest)
-  //   Search already loops through all elements of new forest
-  t8_forest_search(forest_old, t8_search_callback, t8_tutorial_search_query_callback, corners);
+  //0) find corners of old forest in new forest
+  sc_array *corners = t8_build_corners(forest_old);
+  printf("corners built\n");
+  //0) Fill structure corners with relevant information (i.e. cells of new forest which contain corners
+  //   of old forest)
+  //   find corners of old elements in new elements
+  //   The search already loops through all elements of new forest
+  t8_forest_search(forest_new, t8_search_element_callback, t8_search_query_callback, corners);
   //1) Iterieren ueber Zellen des neuen Forests
+  //   to determine intersection
   for (itree = 0, ielem = 0; itree < t8_forest_get_num_local_trees (forest_new); itree++) {
     const t8_locidx_t num_elem = t8_forest_get_tree_num_elements (forest_new, itree);
     /* Inner loop: Iteration over the elements of the local tree */
@@ -578,10 +561,10 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
       // ( t8_forest_t forest1, t8_forest_t forest2, sc_array *corners, t8_element_t *elem2 )
       // cKH: I changed the arguments here - instead of elem1 (elem of the old forest) the
       //      corners information is passed (or one element of corners)
-      //3) Schnitt der Zellen bilden
-      //ielem_t = (t8_element_t *) ielem;
+      //3) Schnitt der Zellen bilden (based on corners of old inside new element)
       ielem_t = (t8_element_t *)  sc_array_index (corners, ielem);
       cell_intersection(forest_old, forest_new, corner, ielem_t, itree);
+      //4) Compare volume
       // add volume as output argument
       //point_cloud_to_volume(points, ...);
     }
@@ -591,25 +574,20 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
   // the next few lines can probably be integrated in the above nested loop
   // volume_new_remap = 0 (can this be stored in volume_intersection_cells?)
   //loop over trees and number of elements of new forest     //volume_new = t8_forest_element_volume (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element)
-      //for elements of corners (i.e. old elements that intersect with new forest)
-          // calculate intersection of corners and forest_new elements
-          // calculate volume
       // sum volume and check if volume_new_remap = volume_new
       // i.e. if volume_cell and volume_intersection_cells are the same?
 
-
-      //3) Schnitt der Zellen bilden
-
-      //4) Volumen vergleichen
-
         //5) Schnittpunkte von Kanten berechnen
+            // create search_query_callback based on segxseg
+            // looking for elements with one intersection point for which no corner_is_inside_element
+            // add their properties to struct cell_corners -> maybe name cell_info
 
         //6) Zellen des alten Forests suchen, in dem die Schnittpunkte enthalten sind
 
         //7) Schnitt der Zellen bilden
 
         //8) Volumen vergleichen
-
+     // still needed?
           //9) Eckpunkte der alten Zellen in der neuen Zelle suchen
 
           //10) Zellen suchen, die diese Eckpunkte als Eckpunkte haben
