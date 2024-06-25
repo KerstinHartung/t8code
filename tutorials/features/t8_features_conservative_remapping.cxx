@@ -234,6 +234,17 @@ main (int argc, char **argv)
   forest_old = t8_step2_build_uniform_forest (comm, cmesh_old, level_old);
   forest_new = t8_step2_build_uniform_forest (comm, cmesh_new, level_new);
 
+  /* Set up user data */
+  struct t8_user_data_per_element
+  {
+    double   volume;
+    double   temeprature;
+  };
+  int num_local_elements = t8_forest_get_local_num_elements (forest_old);
+  int num_ghost_elements = t8_forest_get_num_ghosts (forest_old);
+  struct t8_user_data_per_element *data_new = T8_ALLOC (struct t8_user_data_per_element, num_local_elements + num_ghost_elements);
+  
+
   /* Perform planar conservative remapping. */
   t8_forest_conservative_remapping_planar(forest_old, forest_new);
 

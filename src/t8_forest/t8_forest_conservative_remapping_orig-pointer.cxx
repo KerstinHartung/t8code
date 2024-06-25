@@ -51,6 +51,7 @@ typedef struct
   std::vector<double*> coordinates ;/* The corners of our cell. */
   std::vector<t8_locidx_t> *intersection_cell_indices;
   std::vector<t8_locidx_t> *intersection_cell_treeid;
+  std::vector<double> *intersection_type;
   double volume_cell;
   double volume_intersection_cells;
 
@@ -109,7 +110,7 @@ t8_forest_get_element_nodes (t8_forest_t forest, t8_locidx_t ltreeid, const t8_e
  * could be in this element) or the element is a leaf element.
  */
 static int
-t8_search_element_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element, const int is_leaf,
+t8_search_corners_element_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element, const int is_leaf,
                              t8_element_array_t *leaf_elements, t8_locidx_t tree_leaf_index, void *query,
                              size_t query_index)
 {
@@ -135,7 +136,7 @@ t8_search_element_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_el
  * These counters are provided in an sc_array as user data of the input forest.
  */
 static int
-t8_search_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element,
+t8_search_corners_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element,
                                    const int is_leaf, t8_element_array_t *leaf_elements, t8_locidx_t tree_leaf_index,
                                    void *query, size_t query_index)
 {
@@ -157,6 +158,7 @@ t8_search_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_elem
         //Kh: use . instead of -> for push_back
         corners_of_cell->intersection_cell_indices->push_back( element_index );
         corners_of_cell->intersection_cell_treeid->push_back( ltreeid );
+        corners_of_cell->intersection_type->push_back( 1 );
       }
       /* The particles is inside the element. This query should remain active.
        * If this element is not a leaf the search will continue with its children. */
@@ -248,6 +250,8 @@ t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[
    //return P;
 }
 
+// determine intersection based on indices of old forest elements overlapping currently
+// selected new element
 void //rueckgabewert anpassen oder als pointer uebergeben - Punktwolke
 cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corners_t *corner,
         const t8_element_t *elem_new, t8_locidx_t treeid_new )
@@ -271,25 +275,24 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
      but in reality sharing a segment then can either have after an "e" intersect
      a) next one outside or b) next one inside, in case a) abort since not a true
     "inside" element
+   - add check for parallel orientation
   */
 
   // cKH
-  /* Approach
+  /* Approach: check for corners of old elements inside of current new element
    * - start at first corner of forest_old
    * - iterate over corners and check if inside of new element
    *   - if yes: add to point_cloud and continue with next forest_old element's corner
-   *   - if  no (and already found one point inside): look for cross section point between new and old element
+   *   - if no (and already found one point inside): look for cross section point between new and old element
    *      - iterate over corners of new element untill cross section found
    *      - add cross section point to point_cloud
    *      - (check in which direction next point of new forest element of old element) - decided always counterclockwise
    *      - check for further corners of new element in old element and add to point cloud
    *      - once no longer inside of old element: revert cross section point check (i.e.
    *        cycle through old element corners until intersection with current new element corners found)
-   *   - if  no: continue
+   *   - if no: continue
    * - stop when arrived at first corner again
    * - pass point cloud list
-   * - fill volume_cell (based on t8_forest_element_volume)
-   * - add check for parallel orientation
   */
 
   //number of cells of old forest within new forest element
@@ -298,21 +301,18 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
   //todo: add loop over forest_old_nr_elem (independent outside)
   int_ind = 0;  // index to iterate through old elements intersection with one new element
   //todo: need to set up point_cloud with index storing which element
-  //      of old forest is curently handled, so that find associated volume and value 
-  //      also store volume of this element there 
+  //      of old forest is curently handled, so that find associated volume and value
+  //      also store volume of this element there
   //      when calculating volume can add all compontens together and build array
   //      of new elements and their user_data
 
   //Calculate the corner elements of element of the current old tree
-  // add to function t8_build_corners_elem
+  // add to function t8_build_corners_elem(corner, int_ind, forest_old)
   t8_locidx_t ltree = corner->intersection_cell_treeid->at(int_ind);
   t8_locidx_t element_index = corner->intersection_cell_indices->at(int_ind);
   t8_tree_t tree = t8_forest_get_tree(forest_old, ltree);
   t8_element_t* element = t8_forest_get_tree_element(tree, element_index);
   t8_forest_get_element_nodes(forest_old, ltree, element, coordinates, corner->element_shape_old);
-  //t8_forest_get_element_nodes(forest_old, corner->intersection_cell_treeid[int_ind],
-  //       corner->intersection_cell_indices[int_ind], coordinates );
-  //t8_forest_get_element_nodes(forest_old, (t8_locidx_t*) corner->intersection_cell_treeid[int_ind],
   //      (t8_element_t*) corner->intersection_cell_indices[int_ind], coordinates );
   // find which corners/elements of old forest lie within the new element
   //qKH: do we need this, i.e. might this happen several times? otherwise can just
@@ -323,12 +323,12 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
   // start index variable
   icorner_old = 0;
   // need cycling through to icorner_old again?
-  // yes, probably - because start search only truly from corner which is inside, that might be the 
+  // yes, probably - because start search only truly from corner which is inside, that might be the
   // the first element but then old_inside still TRUE
   // check if 2D or 3D
   is_3D = 0;
   if (t8_get_eclass_scheme[corner->element_shape_old]){
-     
+
   }
   for (icorn_old=icorner_old;icorn_old< (int) t8_eclass_num_vertices[corner->element_shape_old];icorn_old++){
     icorn_old_cur = t8_element_corner_order_2D[corner->element_shape_old][icorn_old];
@@ -542,16 +542,13 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
   int ielem;
   t8_element_t *ielem_t;
   t8_locidx_t itree;
-  //0) find corners of old forest in new forest
-  sc_array *corners = t8_build_corners(forest_old);
+  //0) find corners of elements of new forest in old forest elements
+  sc_array *corners = t8_build_corners(forest_new);
   printf("corners built\n");
-  //0) Fill structure corners with relevant information (i.e. cells of new forest which contain corners
-  //   of old forest)
-  //   find corners of old elements in new elements
-  //   The search already loops through all elements of new forest
-  t8_forest_search(forest_new, t8_search_element_callback, t8_search_query_callback, corners);
-  //1) Iterieren ueber Zellen des neuen Forests
-  //   to determine intersection
+  //1) find elements of old forest which contain corners of new elements (via corners)
+  //   the search already loops through all elements of new forest
+  t8_forest_search(forest_old, t8_search_corners_element_callback, t8_search_corners_query_callback, corners);
+  //2) iterate throught all new cells
   for (itree = 0, ielem = 0; itree < t8_forest_get_num_local_trees (forest_new); itree++) {
     const t8_locidx_t num_elem = t8_forest_get_tree_num_elements (forest_new, itree);
     /* Inner loop: Iteration over the elements of the local tree */
@@ -561,8 +558,10 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
       // ( t8_forest_t forest1, t8_forest_t forest2, sc_array *corners, t8_element_t *elem2 )
       // cKH: I changed the arguments here - instead of elem1 (elem of the old forest) the
       //      corners information is passed (or one element of corners)
-      //3) Schnitt der Zellen bilden (based on corners of old inside new element)
+      //3) determine intersection (based on indices of old elements containing new corners))
+      // qKH: what is difference ielem and ielem_t
       ielem_t = (t8_element_t *)  sc_array_index (corners, ielem);
+      // qKH: one cell_intersection function for all types, or varying?
       cell_intersection(forest_old, forest_new, corner, ielem_t, itree);
       //4) Compare volume
       // add volume as output argument
@@ -572,25 +571,30 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
 
   // cKH
   // the next few lines can probably be integrated in the above nested loop
-  // volume_new_remap = 0 (can this be stored in volume_intersection_cells?)
-  //loop over trees and number of elements of new forest     //volume_new = t8_forest_element_volume (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element)
+  //loop over trees and number of elements of new forest
       // sum volume and check if volume_new_remap = volume_new
-      // i.e. if volume_cell and volume_intersection_cells are the same?
+      // i.e. if volume_cell and volume_intersection_cells are the same
 
+  // continue only for new elements which don't fulfill condition, i.e. volume_new=volume_old_sum
         //5) Schnittpunkte von Kanten berechnen
-            // create search_query_callback based on segxseg
-            // looking for elements with one intersection point for which no corner_is_inside_element
-            // add their properties to struct cell_corners -> maybe name cell_info
-
         //6) Zellen des alten Forests suchen, in dem die Schnittpunkte enthalten sind
+            // find old elements which contain point cloud points of new element
+            // and which were not already stored with flag 1
+            // store those indices with flag 2
 
         //7) Schnitt der Zellen bilden
+            // for all points in point cloud:
+            //   search for neighbour of old cell (or go through all cells)
+            //   i) that contains point and where one corner of new element contained
+            //   ii) search for intersection of edges (if i) no fulfilled)
 
         //8) Volumen vergleichen
-     // still needed?
-          //9) Eckpunkte der alten Zellen in der neuen Zelle suchen
 
+          //9) Eckpunkte der alten Zellen in der neuen Zelle suchen
           //10) Zellen suchen, die diese Eckpunkte als Eckpunkte haben
+             // find for remaining cells - revert search and check if old completely part of
+             //   new element
+             // ensure that cells not already captured as type 1 or 2
 
           //11) Schnitt der Zellen bilden
 
