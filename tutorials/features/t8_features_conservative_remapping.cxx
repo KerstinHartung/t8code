@@ -202,7 +202,8 @@ main (int argc, char **argv)
   t8_cmesh_t cmesh_old, cmesh_new;
   t8_forest_t forest_old, forest_new;
   /* The prefix for our output files. */
-  const char *prefix = "t8_step2_uniform_forest";
+  const char *prefix_old = "t8_old_hex"; //prismcube";
+  const char *prefix_new = "t8_new_hex";
   /* The uniform refinement level of the forest. */
   const int level_old = 3, level_new = 2;
   t8_locidx_t local_num_elements;
@@ -227,8 +228,11 @@ main (int argc, char **argv)
   /* We will use MPI_COMM_WORLD as a communicator. */
   comm = sc_MPI_COMM_WORLD;
   /* Create the cmesh from step1 */
-  cmesh_old = t8_step2_build_prismcube_coarse_mesh (comm);
-  cmesh_new = t8_cmesh_new_periodic_hybrid_2d (comm);
+  //cmesh_old = t8_step2_build_prismcube_coarse_mesh (comm);
+  cmesh_old = t8_cmesh_new_hypercube(T8_ECLASS_HEX, comm, 0, 0, 0); 
+  //cmesh_new = t8_cmesh_new_periodic_hybrid_2d (comm);
+  //cmesh_new = t8_cmesh_new_hypercube(T8_ECLASS_TET, comm, 0, 0, 0);
+  cmesh_new = t8_cmesh_new_hypercube(T8_ECLASS_HEX, comm, 0, 0, 0);
 
   /* Build the uniform forest, it is automatically partitioned among the processes. */
   forest_old = t8_step2_build_uniform_forest (comm, cmesh_old, level_old);
@@ -254,18 +258,32 @@ main (int argc, char **argv)
   global_num_elements = t8_forest_get_global_num_elements (forest_old);
 
   /* Print information on the forest. */
-  t8_global_productionf (" [step2] Created uniform forest.\n");
+  t8_global_productionf (" [step2] Created uniform forest (old).\n");
   t8_global_productionf (" [step2] Refinement level:\t\t\t%i\n", level_old);
   t8_global_productionf (" [step2] Local number of elements:\t\t%i\n", local_num_elements);
   t8_global_productionf (" [step2] Global number of elements:\t%li\n", global_num_elements);
 
+  /* Get the local number of elements. */
+  local_num_elements = t8_forest_get_local_num_elements (forest_new);
+  /* Get the global number of elements. */
+  global_num_elements = t8_forest_get_global_num_elements (forest_new);
+
+  /* Print information on the forest. */
+  t8_global_productionf (" [step2] Created uniform forest (new).\n");
+  t8_global_productionf (" [step2] Refinement level:\t\t\t%i\n", level_new);
+  t8_global_productionf (" [step2] Local number of elements:\t\t%i\n", local_num_elements);
+  t8_global_productionf (" [step2] Global number of elements:\t%li\n", global_num_elements);
+   
+
   /* Write forest to vtu files. */
-  t8_step2_write_forest_vtk (forest_old, prefix);
-  t8_global_productionf (" [step2] Wrote forest to vtu files:\t%s*\n", prefix);
+  t8_step2_write_forest_vtk (forest_old, prefix_old);
+  t8_step2_write_forest_vtk (forest_new, prefix_new);
+  t8_global_productionf (" [step2] Wrote forests to vtu files:\t%s*\n", prefix_old, prefix_new);
 
   /* Destroy the forest. */
   t8_step2_destroy_forest (forest_old);
-  t8_global_productionf (" [step2] Destroyed forest.\n");
+  t8_step2_destroy_forest (forest_new);
+  t8_global_productionf (" [step2] Destroyed forests.\n");
 
   sc_finalize ();
 

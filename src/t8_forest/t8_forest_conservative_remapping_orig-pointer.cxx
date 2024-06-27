@@ -40,7 +40,7 @@
 T8_EXTERN_C_BEGIN ();
 
 void
-t8_next_element(int index_in, int index_out, int direction, t8_element_shape_t element_shape);
+t8_next_element(int index_in, int &index_out, int direction, t8_element_shape_t element_shape);
 
 /* Search query, a set of points. Stores information of new cell and intersecting old cells */
 typedef struct
@@ -61,13 +61,15 @@ typedef struct
 const double
   t8_element_corner_order_2D[T8_ECLASS_COUNT][T8_ECLASS_MAX_CORNERS]
   = { { /* T8_ECLASS_VERTEX */
-        { 0 } },
+         0  } ,
       { /* T8_ECLASS_LINE */
-        { 0 }, { 1 } },
+         0, 1  },
       { /* T8_ECLASS_QUAD */
-        { 0 }, { 1 }, { 3 }, { 2 } },
+         0, 1, 3, 2  },
       { /* T8_ECLASS_TRIANGLE */
-        { 0 }, { 1 }, { 2 } } };
+         0, 1, 2  },
+      { /* T8_ECLASS_HEX */
+         0, 1, 3, 2 } };
 
 /* Additional user data that we process during search.
  * For each element we count the number of particles that it contains
@@ -81,7 +83,7 @@ typedef struct
 
 static void
 t8_forest_get_element_nodes (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element,
-                                 std::vector<double*> &out_coords, t8_element_shape_t element_shape)
+                                 std::vector<double*> &out_coords, t8_element_shape_t &element_shape)
 {
   const t8_eclass_t tree_class = t8_forest_get_tree_class (forest, ltreeid);
   const t8_eclass_scheme_c *scheme = t8_forest_get_eclass_scheme (forest, tree_class);
@@ -221,49 +223,53 @@ t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[
    double num, denom;  /* Numerator and denoninator of equations. */
    //std::vector<double> P[2];
    //double P[2];
-   //char code = '?';    /* Return char characterizing intersection. */
+   char code = '?';    /* Return char characterizing intersection. */
    int X, Y;
 
-   X=1, Y=1;
+   X=0, Y=1, P=0;
 
    std::cout<<"start segxseg\n";
+   std::cout<<vec_a[0]<<vec_a[1]<<vec_a[2]<<"\n";
+   std::cout<<vec_b[0]<<vec_b[1]<<vec_b[2]<<"\n";
+
 
    denom = vec_a[X] * (double)( vec_d[Y] - vec_c[Y] ) +
            vec_b[X] * (double)( vec_c[Y] - vec_d[Y] ) +
            vec_d[X] * (double)( vec_b[Y] - vec_a[Y] ) +
            vec_c[X] * (double)( vec_a[Y] - vec_b[Y] );
    /* If denom is zero, then segments are parallel: handle separately. */
-   //if (denom < tol)  return  ParallelInt(vec_a, vec_b, vec_c, vec_d, P);
+   if (denom < tol) code = 'p'; //  return  ParallelInt(vec_a, vec_b, vec_c, vec_d, P);
 
-   std::cout<<"segxseg: denom calcualted\n";
    num =    vec_a[X] * (double)( vec_d[Y] - vec_c[Y] ) +
             vec_c[X] * (double)( vec_a[Y] - vec_d[Y] ) +
             vec_d[X] * (double)( vec_c[Y] - vec_a[Y] );
    // update num == denom also with tolerance?
-   //if ( (num < tol) || (num == denom) ) code = 'v';
+   if ( (num < tol) || (num - denom < tol) ) code = 'v';
    s = num / denom;
    printf("num=%lf, denom=%lf, s=%lf\n", num, denom, s);
 
    num = -( vec_a[X] * (double)( vec_c[Y] - vec_b[Y] ) +
             vec_b[X] * (double)( vec_a[Y] - vec_c[Y] ) +
             vec_c[X] * (double)( vec_b[Y] - vec_a[Y] ) );
-   //if ( (num < tol) || (num == denom) ) code = 'v';
+   if ( (num < tol) || (num - denom < tol) ) code = 'v';
    t = num / denom;
    printf("num=%lf, denom=%lf, t=%lf\n", num, denom, t);
 
-   std::cout<<"in segxseg check\n";
-
-   if      ( (-tol < s) && (s < (1.0+tol)) &&
-             (-tol < t) && (t < (1.0+tol)) ){
+   if        ( (tol < s) && (s < (1.0-tol)) &&
+             (tol < t) && (t < (1.0-tol)) ){
    //  code = '1';
-   //else if ( (0.0 > s) || (s > 1.0) ||
-   //          (0.0 > t) || (t > 1.0) )
+   //}else if ( (-tol > s) || (s > (1.0+tol)) ||
+   //          (-tol > t) || (t > (1.0+tol)) ){
    //  code = '0';
+   //}
 
-     P[X] = vec_a[X] + s * ( vec_b[X] - vec_a[X] );
-     P[Y] = vec_a[Y] + s * ( vec_b[Y] - vec_a[Y] );
+   //if (code != 'p') {
+   P[X] = vec_a[X] + s * ( vec_b[X] - vec_a[X] );
+   P[Y] = vec_a[Y] + s * ( vec_b[Y] - vec_a[Y] );
    }
 
+   printf("P=%lf\n", P);
+   printf("code=%d\n", code);
    //return P;
 }
 
@@ -362,14 +368,12 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
       /* look for edges of new element, starting from edge 0/face f2 */
       icorn_new_cur = t8_element_corner_order_2D[corner->element_shape_new][icorn_new];
       t8_next_element(icorn_new, icorn_new_next, +1, corner->element_shape_new);
-      std::cout<<"before while loop\n";
+
       while(search_cross){
-        std::cout<<"in while loop\n";
         // find intersection between two neighboring points in old and new grid
         t8_vec_segxseg(coordinates.at(icorn_old_prev), coordinates.at(icorn_old_cur),
           corner->coordinates.at(icorn_new_cur), corner->coordinates.at(icorn_new_next),
           tolerance, intersect_point);
-        std::cout<<"segxseg check done\n";
         // check if two edges intersect in exactly one point
         if (sizeof(intersect_point)/sizeof(double)==1){
           // add intersection to list of points
@@ -486,34 +490,51 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
 
 
 void
-t8_next_element(int index_in, int index_out, int direction, t8_element_shape_t element_shape)
+t8_next_element(int index_in, int &index_out, int direction, t8_element_shape_t element_shape)
 {
   // direction +1 or -1
   size_t nr = t8_eclass_num_vertices[element_shape];
   int index;
+
+  //std::cout<<"calc next element for index_in:"<<index_in << " and direction "<< direction<<" and number of vertices "<<nr <<" \n";
+  index_out = 0;
+  if (element_shape==T8_ECLASS_HEX){
+    if (index_in>3){ 
+      index_in = index_in - 4;
+      index_out = index_out + 4;
+      nr = 4;
+    }else{
+      nr = 4;
+    }
+  }
   if (direction==1){
     for (index=0; index<(int) nr; index++){
-      if (index==index_in){
+      if (index_in==t8_element_corner_order_2D[element_shape][index]){
         // if last element in round
-        if ((index+1)==(int) nr){
-          index_out = t8_element_corner_order_2D[element_shape][0];
+        if ((index+1)==nr){
+          index_out = index_out + t8_element_corner_order_2D[element_shape][0];
+          break;
         }else{
-          index_out = t8_element_corner_order_2D[element_shape][index_in+1];
+          index_out = index_out + t8_element_corner_order_2D[element_shape][index+1];
+          break;
         }
       }
     }
   }else if(direction==-1){
     for (index=nr; index>0; index-=1){
-      if (index==index_in){
+      if (index_in==t8_element_corner_order_2D[element_shape][index]){
         // if first element in round
-        if ((index-1)==0){
-          index_out = t8_element_corner_order_2D[element_shape][nr];
+        if ((index)==0){
+          index_out = index_out + t8_element_corner_order_2D[element_shape][nr-1];
+          break;
         }else{
-          index_out = t8_element_corner_order_2D[element_shape][index_in-1];
+          index_out = index_out + t8_element_corner_order_2D[element_shape][index-1];
+          break;
         }
       }
     }
   }
+  //std::cout<<"index_in and out: "<<index_in<<" "<<index_out<<" \n";
 }
 
 /*
