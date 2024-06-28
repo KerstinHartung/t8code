@@ -37,6 +37,21 @@
 #include <vector>
 
 
+/*
+TODO
+- finish cell_intersection
+- add volume calculation from point cloud (maybe via qhull)
+- add another search algorithm t8_search_edges_element_callback
+  - looking for edges via finding elements that contain one of intersection points
+    and where not already considered (i.e. don't contain corner of new element
+- volume check in between)
+- add another search algorithm t8_search_contained_element_callback
+  - looking for new elements which completely contain old ones
+- maybe as a last step - if still not complete volume - look for edges which
+  just intersect but don't contain any edge points in either direction
+  (because these are hardest to find)
+*/
+
 T8_EXTERN_C_BEGIN ();
 
 void
@@ -48,11 +63,16 @@ typedef struct
   /* assumption: element shape is globally constant */
   t8_element_shape_t element_shape_new;
   t8_element_shape_t element_shape_old;
-  //std::vector<double*> coordinates{std::vector<double*>(3)};/* The corners of our cell. */
   std::vector<double*> coordinates;
   std::vector<t8_locidx_t> intersection_cell_indices;
   std::vector<t8_locidx_t> intersection_cell_treeid;
   std::vector<int> intersection_type;
+  /*
+    intersection_type can be
+    - 1: corners contained
+    - 2: edges contained
+    - 3: new element completely inside of old element
+  */
   double volume_cell;
   double volume_intersection_cells;
 
@@ -156,14 +176,9 @@ t8_search_corners_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const
   /* Numerical tolerance for the is_inside_element check. */
   const double tolerance = 1e-8;
 
+  // search for new corners in old element, i.e.  forest below is forest_old 
   for( size_t icorner = 0; icorner < corners_of_cell->coordinates.size(); icorner++ )
-  //for(std::vector<double*>::size_type icorner = 0; icorner < corners_of_cell->coordinates.size(); icorner++ )
   {
-    if(icorner==0){
-     //std::cout <<corners_of_cell->coordinates.size()<<"\n";
-     //std::cout <<" in query callback"<<"\n";
-     //std::cout <<*corners_of_cell->coordinates.at(icorner)<<"\n";
-    }
     corner_is_inside_element = t8_forest_element_point_inside (forest, ltreeid, element, corners_of_cell->coordinates.at(icorner), tolerance);
     if (corner_is_inside_element) {
       if (is_leaf) {
@@ -173,11 +188,18 @@ t8_search_corners_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const
         corners_of_cell->intersection_cell_indices.push_back( element_index );
         corners_of_cell->intersection_cell_treeid.push_back( ltreeid );
         corners_of_cell->intersection_type.push_back( 1 );
+        // qkh: stop here automatically since return 1 (i.e. leave function) next
+        //      leaf elements are not searched again, right?
+        //      need to avoid adding the same element several times
+        // stop loop now to avoid adding the same element several times
       }
-      /* The particles is inside the element. This query should remain active.
+      /* The particles is inside the element (finding one corner is sufficient). This query should remain active.
        * If this element is not a leaf the search will continue with its children. */
       return 1;
     }
+  }
+  // qkh: okay to move this out of loop? otherwise only first corner is tested, right?
+  if (!corner_is_inside_element){
     /* The particle is not inside the element. Deactivate this query.
      * If no active queries are left, the search will stop for this element and its children. */
     return 0;
@@ -188,7 +210,7 @@ t8_search_corners_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const
 //std::vector<double>
 //double
 void
-t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[3], const double vec_d[3], double tol, double P[3])
+t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[3], const double vec_d[3], double tol, double P[3], char code)
 {
   /*
    From Zoltan Csati for Matlab,  21/11/2018
@@ -223,53 +245,73 @@ t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[
    double num, denom;  /* Numerator and denoninator of equations. */
    //std::vector<double> P[2];
    //double P[2];
-   char code = '?';    /* Return char characterizing intersection. */
-   int X, Y;
+   code = '?';    /* Return char characterizing intersection. */
+   int X, Y, Z;
 
-   X=0, Y=1, P=0;
+   X=0, Y=1, P= new double(3);
+
+   switch (X+Y+Z){
+     case 1:
+       Z = 2;
+       break;
+     case 2:
+       Z = 1;
+       break;
+     case 3:
+       Z = 0;
+       break;
+     default:
+       abort;
+   }
 
    std::cout<<"start segxseg\n";
-   std::cout<<vec_a[0]<<vec_a[1]<<vec_a[2]<<"\n";
-   std::cout<<vec_b[0]<<vec_b[1]<<vec_b[2]<<"\n";
-
-
+   /*
+   printf("veca=%lf, %lf, %lf\n",vec_a[0], vec_a[1], vec_a[2]);
+   printf("vecb=%lf, %lf, %lf\n",vec_b[0], vec_b[1], vec_b[2]);
+   printf("vecc=%lf, %lf, %lf\n",vec_c[0], vec_c[1], vec_c[2]);
+   printf("vecd=%lf, %lf, %lf\n",vec_d[0], vec_d[1], vec_d[2]);
+   */
    denom = vec_a[X] * (double)( vec_d[Y] - vec_c[Y] ) +
            vec_b[X] * (double)( vec_c[Y] - vec_d[Y] ) +
            vec_d[X] * (double)( vec_b[Y] - vec_a[Y] ) +
            vec_c[X] * (double)( vec_a[Y] - vec_b[Y] );
    /* If denom is zero, then segments are parallel: handle separately. */
-   if (denom < tol) code = 'p'; //  return  ParallelInt(vec_a, vec_b, vec_c, vec_d, P);
+   // denom == 0
+   if (std::abs(denom) < tol) code = 'p'; //  return  ParallelInt(vec_a, vec_b, vec_c, vec_d, P);
 
    num =    vec_a[X] * (double)( vec_d[Y] - vec_c[Y] ) +
             vec_c[X] * (double)( vec_a[Y] - vec_d[Y] ) +
             vec_d[X] * (double)( vec_c[Y] - vec_a[Y] );
-   // update num == denom also with tolerance?
-   if ( (num < tol) || (num - denom < tol) ) code = 'v';
+   // denom == 0 || num == denom
+   if ( (std::abs(num) < tol) || (std::abs(num - denom) < tol) ) code = 'v';
    s = num / denom;
-   printf("num=%lf, denom=%lf, s=%lf\n", num, denom, s);
+   //printf("num=%lf, denom=%lf, s=%lf\n", num, denom, s);
 
    num = -( vec_a[X] * (double)( vec_c[Y] - vec_b[Y] ) +
             vec_b[X] * (double)( vec_a[Y] - vec_c[Y] ) +
             vec_c[X] * (double)( vec_b[Y] - vec_a[Y] ) );
-   if ( (num < tol) || (num - denom < tol) ) code = 'v';
+   //  denom == 0 || num == denom
+   if ( (std::abs(num) < tol) || (std::abs(num - denom) < tol) ) code = 'v';
    t = num / denom;
-   printf("num=%lf, denom=%lf, t=%lf\n", num, denom, t);
+   //printf("num=%lf, denom=%lf, t=%lf\n", num, denom, t);
 
-   if        ( (tol < s) && (s < (1.0-tol)) &&
-             (tol < t) && (t < (1.0-tol)) ){
-   //  code = '1';
-   //}else if ( (-tol > s) || (s > (1.0+tol)) ||
-   //          (-tol > t) || (t > (1.0+tol)) ){
-   //  code = '0';
-   //}
-
-   //if (code != 'p') {
-   P[X] = vec_a[X] + s * ( vec_b[X] - vec_a[X] );
-   P[Y] = vec_a[Y] + s * ( vec_b[Y] - vec_a[Y] );
+   // including tolerance - try to capture points by code = '1'
+   if        ( (-tol < s) && (s < (1.0+tol)) &&
+             (-tol < t) && (t < (1.0+tol)) ){
+     code = '1';
+   }else if ( ((-tol > s) || (s > (1.0+tol)) ||
+             (-tol > t) || (t > (1.0+tol))) && 
+             std::isfinite(s) && std::isfinite(t)){
+     code = '0';
    }
 
-   printf("P=%lf\n", P);
-   printf("code=%d\n", code);
+   P[X] = vec_a[X] + s * ( vec_b[X] - vec_a[X] );
+   P[Y] = vec_a[Y] + s * ( vec_b[Y] - vec_a[Y] );
+   P[Z] = vec_a[Z];
+   // ensure that Z-axis is the same for all points?
+
+   if (code == '1') printf("P=%lf, %lf, %lf\n", P[X], P[Y], P[Z]);
+   //printf("code=%c\n", code);
    //return P;
 }
 
@@ -291,34 +333,38 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
   int icorn_old_prev,icorn_old, icorn_new;
   int icorn_new_cur, icorn_new_next;
   double intersect_point[3];
+  char intersect_state;
 
   /* todo
+   - update routine: first started with old corners - but probably makes more sense to start with new corner
+     as this is anyways what we already found
    - add outer loop over all old elements with at least one corner inside
    - add case check (and thus return char for test): if points are "inside"
-     but in reality sharing a segment then can either have after an "e" intersect
+     but in reality only sharing a segment then can either have after an "e" intersect
      a) next one outside or b) next one inside, in case a) abort since not a true
     "inside" element
    - add check for parallel orientation
   */
 
   // cKH
-  /* Approach: check for corners of old elements inside of current new element
-   * - start at first corner of forest_old
-   * - iterate over corners and check if inside of new element
-   *   - if yes: add to point_cloud and continue with next forest_old element's corner
+  /*
+   * - start with first old element (eventually have loop over old elements here)
+   * - start at first corner of forest_new
+   * - iterate over corners and check if inside of old element
+   *   - if yes: add to point_cloud and continue with next forest_new element's corner
    *   - if no (and already found one point inside): look for cross section point between new and old element
-   *      - iterate over corners of new element untill cross section found
+   *      - iterate over corners of old element untill cross section found
    *      - add cross section point to point_cloud
-   *      - (check in which direction next point of new forest element of old element) - decided always counterclockwise
-   *      - check for further corners of new element in old element and add to point cloud
-   *      - once no longer inside of old element: revert cross section point check (i.e.
-   *        cycle through old element corners until intersection with current new element corners found)
+   *      - (check in which direction next point of old forest element inside of new  element) - decided always counterclockwise
+   *      - check for further corners of old element in new element and add to point cloud
+   *      - once no longer inside of new element: revert cross section point check (i.e.
+   *        cycle through new element corners until intersection with current old element corners found)
    *   - if no: continue
    * - stop when arrived at first corner again
    * - pass point cloud list
   */
 
-  //number of cells of old forest within new forest element
+  //number of elements of old forest within new forest element
   forest_old_nr_elem = corner->intersection_cell_indices.size();
 
   //todo: add loop over forest_old_nr_elem (independent outside)
@@ -329,7 +375,7 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
   //      when calculating volume can add all compontens together and build array
   //      of new elements and their user_data
 
-  //Calculate the corner elements of element of the current old tree
+  //Calculate the corner elements of the current old tree
   // add to function t8_build_corners_elem(corner, int_ind, forest_old)
   t8_locidx_t ltree = corner->intersection_cell_treeid.at(int_ind);
   t8_locidx_t element_index = corner->intersection_cell_indices.at(int_ind);
@@ -373,9 +419,9 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
         // find intersection between two neighboring points in old and new grid
         t8_vec_segxseg(coordinates.at(icorn_old_prev), coordinates.at(icorn_old_cur),
           corner->coordinates.at(icorn_new_cur), corner->coordinates.at(icorn_new_next),
-          tolerance, intersect_point);
+          tolerance, intersect_point, intersect_state);
         // check if two edges intersect in exactly one point
-        if (sizeof(intersect_point)/sizeof(double)==1){
+        if (intersect_state=='1'){
           // add intersection to list of points
           point_cloud.push_back(intersect_point);
           /* I think the "next" vertex should always be inside the old element - otherwise cycle through*/
@@ -641,8 +687,10 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
       // i.e. if volume_cell and volume_intersection_cells are the same
 
   // continue only for new elements which don't fulfill condition, i.e. volume_new=volume_old_sum
+  // need to ensure that elements are not counted twice!!!
+  // check also which other steps might be covered by tolerance
         //5) Schnittpunkte von Kanten berechnen
-        //6) Zellen des alten Forests suchen, in dem die Schnittpunkte enthalten sind
+        //6) Zellen des alten Forests suchen, in dem die Kanten enthalten sind
             // find old elements which contain point cloud points of new element
             // and which were not already stored with flag 1
             // store those indices with flag 2
@@ -666,6 +714,7 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
           //12) Volumen vergleichen -> nicht gleich? -> Fehler
 
     //13) Berechnen des Wertes der neuen Zelle
+
 }
 
 T8_EXTERN_C_END ();
