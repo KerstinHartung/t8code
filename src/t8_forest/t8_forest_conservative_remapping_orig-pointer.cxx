@@ -109,24 +109,15 @@ t8_forest_get_element_nodes (t8_forest_t forest, t8_locidx_t ltreeid, const t8_e
   const t8_eclass_scheme_c *scheme = t8_forest_get_eclass_scheme (forest, tree_class);
   element_shape = scheme->t8_element_shape (element);
   int num_corner = t8_eclass_num_vertices[element_shape];
-  //out_coords.reserve(num_corner);
-  //double test[3]; - pass as argument to routine to be able to access content outside
   for( int icorner = 0; icorner < num_corner; icorner++ )
   {
     // fill vector
     out_coords.push_back(0);
     const double *ref_coords = t8_element_corner_ref_coords[element_shape][icorner];
-    //double local[3] = {0,0,0};
-    //out_coords.at(icorner) = local;
-    //todoKH: need to release memory after usage if this approach is kept
     out_coords.at(icorner) = new double[3];
+    // add corner elements, function requires pre-existing memory
     t8_forest_element_from_ref_coords (forest, ltreeid, element, ref_coords, 1, out_coords.at(icorner), NULL );
-    //t8_forest_element_from_ref_coords (forest, ltreeid, element, ref_coords, 1, test, NULL);
-    //out_coords.at(icorner)[0] = test[0];
   }
-  //  std::cout << "size of coordinates "<<out_coords.size()<<"\n";
-  //  std::cout << *out_coords.at(0)<<"\n";
-  //std::cout << out_coords.at(0)[0]<< " "<< out_coords.at(1)[1]<< " "<< out_coords.at(2)[2]<<'\n';
 }
 
 /*
@@ -184,13 +175,9 @@ t8_search_corners_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const
       if (is_leaf) {
         t8_locidx_t element_index = t8_forest_get_tree_element_offset (forest, ltreeid) + tree_leaf_index;
         //add index of the cell to list of new element
-        //Kh: use . instead of -> for push_back
         corners_of_cell->intersection_cell_indices.push_back( element_index );
         corners_of_cell->intersection_cell_treeid.push_back( ltreeid );
         corners_of_cell->intersection_type.push_back( 1 );
-        // qkh: stop here automatically since return 1 (i.e. leave function) next
-        //      leaf elements are not searched again, right?
-        //      need to avoid adding the same element several times
         // stop loop now to avoid adding the same element several times
       }
       /* The particles is inside the element (finding one corner is sufficient). This query should remain active.
@@ -198,7 +185,6 @@ t8_search_corners_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const
       return 1;
     }
   }
-  // qkh: okay to move this out of loop? otherwise only first corner is tested, right?
   if (!corner_is_inside_element){
     /* The particle is not inside the element. Deactivate this query.
      * If no active queries are left, the search will stop for this element and its children. */
@@ -622,20 +608,9 @@ t8_build_corners( t8_forest_t forest )
       auto element = t8_forest_get_element ( forest, ielem_tree, &looptree);
       //Calculate the corner elements of an element
       t8_forest_get_element_nodes(forest, looptree, element, corner->coordinates, corner->element_shape_new);
-      //t8_forest_get_element_nodes(forest, looptree, element, corner->coordinates, corner->element_shape_new,test );
-      //if (ielem<4){
-      //  printf("output get_element_nodes \n ");
-        //std::cout << test[1]<<"\n";
-        //std::cout << corner->coordinates.size()<<"\n";
-      //  std::cout << ielem<< "  " << corner->coordinates.at(2)[1] <<"\n";
-        //std::cout << ielem<< "  " <<"\n";
-      //}
       corner->volume_cell = t8_forest_element_volume( forest, looptree, element );
     }
   }
-  //t8_cell_corners_t *corner
-  //      = (t8_cell_corners_t *) sc_array_index_int (corners, 0);
-  //std::cout << corner->coordinates.at(0)[1]<<"\n";
   return corners;
 }
 
@@ -648,14 +623,10 @@ void t8_free_corners( t8_forest_t forest, sc_array *corners)
     const t8_locidx_t num_elem = t8_forest_get_tree_num_elements (forest, itree);
     /* Inner loop: Iteration over the elements of the local tree */
     for (t8_locidx_t ielem_tree = 0; ielem_tree < num_elem; ielem_tree++, ielem++) {
-    //cKH: Returns a pointer to an array element indexed by a plain int. (note on sc_array_index_int)
       t8_cell_corners_t *corner
         = (t8_cell_corners_t *) sc_array_index_int (corners, ielem);
       t8_locidx_t looptree=itree;
       auto element = t8_forest_get_element ( forest, ielem_tree, &looptree);
-   // t8_forest_get_element_nodes(forest, looptree, element, corner->coordinates, corner->element_shape_new);
-   //t8_forest_get_element_nodes (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element,
-   //                              std::vector<double*> &out_coords, t8_element_shape_t &element_shape)
       const t8_eclass_t tree_class = t8_forest_get_tree_class (forest, looptree);
       const t8_eclass_scheme_c *scheme = t8_forest_get_eclass_scheme (forest, tree_class);
       t8_element_shape_t element_shape = scheme->t8_element_shape (element);
