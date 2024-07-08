@@ -176,7 +176,7 @@ t8_search_corners_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const
   /* Numerical tolerance for the is_inside_element check. */
   const double tolerance = 1e-8;
 
-  // search for new corners in old element, i.e.  forest below is forest_old 
+  // search for new corners in old element, i.e.  forest below is forest_old
   for( size_t icorner = 0; icorner < corners_of_cell->coordinates.size(); icorner++ )
   {
     corner_is_inside_element = t8_forest_element_point_inside (forest, ltreeid, element, corners_of_cell->coordinates.at(icorner), tolerance);
@@ -300,7 +300,7 @@ t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[
              (-tol < t) && (t < (1.0+tol)) ){
      code = '1';
    }else if ( ((-tol > s) || (s > (1.0+tol)) ||
-             (-tol > t) || (t > (1.0+tol))) && 
+             (-tol > t) || (t > (1.0+tol))) &&
              std::isfinite(s) && std::isfinite(t)){
      code = '0';
    }
@@ -414,11 +414,12 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
     if (new_inside && !corner_is_inside_element){
       new_inside = false;
       std::cout<<"switch search order\n";
-      // previous one was inside, next one isn't -> look for intersection old and new mesh element
-      // first: check from new->old
+      // previous one was inside old element, next one isn't -> look for intersection old and new mesh element
+      // first: check new->old
       finding_intersec_fromold = false;
       t8_next_element(icorn_new, icorn_new_prev, -1, corner->element_shape_new);
-      icorn_old = 0;
+      // start searching for intersection at same vertical level
+      icorn_old = z_shift;
       /* look for edges of old element, starting from edge 0/face f2 */
       icorn_old_cur = t8_element_corner_order_2D[corner->element_shape_old][icorn_old];
       t8_next_element(icorn_old, icorn_old_next, +1, corner->element_shape_old);
@@ -451,7 +452,7 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
               search_cross = false;
               // leave while loop!!
             }
-          }
+          } // if(corner_new_is_inside_element)
           std::cout<<"after corner_new_inside check\n";
           //}else{
             // otherwise this means that old element is much smaller and lies between two vertices
@@ -477,7 +478,7 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
                 icorn_old-=1;
               }
             } // while (corner_new_is_inside_element)
-          }
+          } // if (finding_intersec_fromold)
           // now are inside old, so check old->new
           if ((finding_intersec_fromold == 0) and (!search_cross)){
             // abort - something went wrong
@@ -531,7 +532,6 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
 // qKH: but doesn't "corners" already store the ltree_id value after the callback (for the old forest)?
 
 //Eckpunkte des Schnittes zurueckgeben
-
 }
 
 
@@ -546,7 +546,7 @@ t8_next_element(int index_in, int &index_out, int direction, t8_element_shape_t 
   //std::cout<<"calc next element for index_in:"<<index_in << " and direction "<< direction<<" and number of vertices "<<nr <<" \n";
   index_out = 0;
   if (element_shape==T8_ECLASS_HEX){
-    if (index_in>3){ 
+    if (index_in>3){
       index_in = index_in - 4;
       index_out = index_out + 4;
       nr = 4;
@@ -639,6 +639,34 @@ t8_build_corners( t8_forest_t forest )
   return corners;
 }
 
+void t8_free_corners( t8_forest_t forest, sc_array *corners)
+{
+  int ielem;
+  t8_locidx_t itree;
+  std::cout << t8_forest_get_num_local_trees (forest) <<"  "<<t8_forest_get_global_num_elements( forest )<<std::endl;
+  for (itree = 0, ielem = 0; itree < t8_forest_get_num_local_trees (forest); itree++) {
+    const t8_locidx_t num_elem = t8_forest_get_tree_num_elements (forest, itree);
+    /* Inner loop: Iteration over the elements of the local tree */
+    for (t8_locidx_t ielem_tree = 0; ielem_tree < num_elem; ielem_tree++, ielem++) {
+    //cKH: Returns a pointer to an array element indexed by a plain int. (note on sc_array_index_int)
+      t8_cell_corners_t *corner
+        = (t8_cell_corners_t *) sc_array_index_int (corners, ielem);
+      t8_locidx_t looptree=itree;
+      auto element = t8_forest_get_element ( forest, ielem_tree, &looptree);
+   // t8_forest_get_element_nodes(forest, looptree, element, corner->coordinates, corner->element_shape_new);
+   //t8_forest_get_element_nodes (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element,
+   //                              std::vector<double*> &out_coords, t8_element_shape_t &element_shape)
+      const t8_eclass_t tree_class = t8_forest_get_tree_class (forest, looptree);
+      const t8_eclass_scheme_c *scheme = t8_forest_get_eclass_scheme (forest, tree_class);
+      t8_element_shape_t element_shape = scheme->t8_element_shape (element);
+      int num_corner = t8_eclass_num_vertices[element_shape];
+      for( int icorner = 0; icorner < num_corner; icorner++ ){
+         delete corner->coordinates.at(icorner);
+      }
+    }
+  }
+}
+
 void
 t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t forest_new )
 {
@@ -715,6 +743,9 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
           //12) Volumen vergleichen -> nicht gleich? -> Fehler
 
     //13) Berechnen des Wertes der neuen Zelle
+
+   //14) free memory
+  t8_free_corners( forest_new, corners);
 
 }
 
