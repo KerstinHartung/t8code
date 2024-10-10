@@ -43,8 +43,8 @@ TODO
 - add volume calculation from point cloud (maybe via qhull)
 - add another search algorithm t8_search_edges_element_callback
   - looking for edges via finding elements that contain one of intersection points
-    and where not already considered (i.e. don't contain corner of new element
-- volume check in between)
+    and where not already considered (i.e. don't contain corner of new element)
+  - volume check in between
 - add another search algorithm t8_search_contained_element_callback
   - looking for new elements which completely contain old ones
 - maybe as a last step - if still not complete volume - look for edges which
@@ -192,7 +192,7 @@ t8_search_corners_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const
   }
 }
 
-/* 
+/*
    the below functions are from https://github.com/w8r/orourke-compc/blob/master/segseg/segseg.c
 */
 void
@@ -233,15 +233,19 @@ int     AreaSign( const double vec_a[3], const double vec_b[3], const double vec
     area2 = ( vec_b[X] - vec_a[X] ) * (double)( vec_c[Y] - vec_a[Y] ) -
             ( vec_c[X] - vec_a[X] ) * (double)( vec_b[Y] - vec_a[Y] );
 
+    std::cout<<"area2 "<< area2<<"\n";
     /* The area should be an integer. */
-    if      ( area2 >  0.5 ) return  1;
-    else if ( area2 < -0.5 ) return -1;
+    //qKH: why should this be 0.5 (as in original) or rather 1e-8? shouldn't this be a threshold
+    if      ( area2 >  1e-8) return  1;
+    else if ( area2 <  -1e-8 ) return -1;
     else                     return  0;
 }
 
-void 
+void
 t8_vec_parallelint(const double vec_a[3], const double vec_b[3], const double vec_c[3], const double vec_d[3], double P[3], double Q[3], char &code, int X, int Y)
 {
+  P[0]=-1,P[1]=-1,P[2]=-1;
+  Q[0]=-1,Q[1]=-1,Q[2]=-1;
   if (!Collinear(vec_a, vec_b, vec_c, X, Y)){
     code = '0';
     std::cout<<"not collinear\n";
@@ -377,7 +381,7 @@ t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[
    P[Z] = vec_a[Z];
    // ensure that Z-axis is the same for all points?
    std::cout<<"code "<<code<<"\n";
-   //if (code == '1') printf("P=%lf, %lf, %lf\n", P[X], P[Y], P[Z]); 
+   //if (code == '1') printf("P=%lf, %lf, %lf\n", P[X], P[Y], P[Z]);
    printf("P=%lf, %lf, %lf\n", P[X], P[Y], P[Z]);
    //printf("code=%c\n", code);
    //return P;
@@ -386,20 +390,23 @@ t8_vec_segxseg(const double vec_a[3], const double vec_b[3], const double vec_c[
 // determine intersection based on indices of old forest elements overlapping currently
 // selected new element
 void //rueckgabewert anpassen oder als pointer uebergeben - Punktwolke
-cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corners_t *corner,
+cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corners_t *cornew,
         const t8_element_t *elem_new, t8_locidx_t treeid_new )
 {
   // information about old forest
-  std::vector<double*> coordinates;
+  std::vector<double*> corcoord_old;
   const double tolerance = 1e-8;
-  std::vector<double*> point_cloud;
+  std::vector< std::vector<double*> > full_point_cloud;
+  std::vector< double*> point_cloud;
+  std::vector<double*> intersect_points;
   bool new_inside, corner_is_inside_element;
   bool find_intersec_toold, search_cross, search_new;
   //t8_locidx_t int_ind;
-  int int_ind, is_3D;
+  int int_ind, is_3D, nr_intersect_points;
   int forest_old_nr_elem, icorner_new, icorn_new_cur;
   int icorn_new_prev,i_new, i_old,start_index;
   int icorn_old_cur, icorn_new_next, icorn_old_next;
+  int icorn_old_cur_start, icorn_new_cur_start;
   double intersect_point[3], intersect_vertex[3];
   char intersect_state;
   double search_z;
@@ -435,8 +442,9 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
   */
 
   //number of elements of old forest within new forest element
-  forest_old_nr_elem = corner->intersection_cell_indices.size();
+  forest_old_nr_elem = cornew->intersection_cell_indices.size();
 
+  nr_intersect_points = 0;
   //todo: add loop over forest_old_nr_elem (independent outside)
   int_ind = 0;  // index to iterate through old elements intersecting with one new element
   //todo: need to set up point_cloud with index storing which element
@@ -445,221 +453,290 @@ cell_intersection( t8_forest_t forest_old, t8_forest_t forest_new, t8_cell_corne
   //      when calculating volume can add all compontens together and build array
   //      of new elements and their user_data
 
-  //Calculate the corner elements of the current old tree
-  // add to function t8_build_corners_elem(corner, int_ind, forest_old)
-  t8_locidx_t ltree = corner->intersection_cell_treeid.at(int_ind);
-  t8_locidx_t element_index = corner->intersection_cell_indices.at(int_ind);
-  t8_tree_t tree = t8_forest_get_tree(forest_old, ltree);
-  t8_element_t* element = t8_forest_get_tree_element(tree, element_index);
-  t8_forest_get_element_nodes(forest_old, ltree, element, coordinates, corner->element_shape_old);
-  // find which corners/elements of old forest lie within the new element
-  //qKH: do we need this, i.e. might this happen several times? otherwise can just
-  //     check length of point_inside/=0
-  new_inside = true;
-  //qKH: only required once per element since due to shape of elements can only intersect twice max?
-  search_cross = true;
-  find_intersec_toold = true;
-  // if start not from 0 but from variable => can call this again later as function with updated
-  // start index variable
-  icorner_new = 0;
-  // need cycling through to icorner_new again?
-  // yes, probably - because start search only truly from corner which is inside, that might be the
-  // the first element but then old_inside still TRUE
-  // check if 2D or 3D
-  is_3D = true;
-  // re-initialize search_z
-  search_z=-1;
-  search_new = true;
-  z_shift=0;
-  //if (t8_get_eclass_scheme[corner->element_shape_old]){
-  //
- // }
-  i_new=icorner_new;
-  icorn_new_cur = t8_element_corner_order_2D[corner->element_shape_new][i_new];
-  // use z_shift also in main part!!
-  //for (i_new=icorner_new;i_new< (int) t8_eclass_num_vertices[corner->element_shape_new];i_new++){
-  while (search_new){
-    std::cout<<"in loop of new index "<<icorn_new_cur<<" of "<<t8_eclass_num_vertices[corner->element_shape_new]<<"\n";
-    // store index alongside search? then don't need to execute this exact same call twice?
-    corner_is_inside_element =
-      t8_forest_element_point_inside (forest_old, ltree, element, corner->coordinates.at(icorn_new_cur), tolerance);
-    std::cout<<"corner is inside element "<< corner_is_inside_element<<"\n";
-    if (point_cloud.size()!=0 && !corner_is_inside_element){
-      new_inside = false;
-      std::cout<<"switch search order\n";
-      while(search_cross){
-      if (find_intersec_toold){
-        t8_next_element(icorn_new_cur, icorn_new_prev, -1, corner->element_shape_new);
-        icorn_new_next = icorn_new_cur;
-        icorn_new_cur = icorn_new_prev;
-        // start searching for intersection at same vertical level
-        i_old = z_shift;
-        /* look for edges of old element, starting from edge 0/face f2 */
-        icorn_old_cur = t8_element_corner_order_2D[corner->element_shape_old][i_old];
-        t8_next_element(icorn_old_cur, icorn_old_next, +1, corner->element_shape_old);
-      }
-      //while(search_cross){
-        // find intersection between two neighboring points in old and new grid
-        if (!find_intersec_toold){
-          t8_vec_segxseg(coordinates.at(icorn_old_cur), coordinates.at(icorn_old_next),
-          corner->coordinates.at(icorn_new_cur), corner->coordinates.at(icorn_new_next),
-          tolerance, intersect_point, intersect_vertex, intersect_state, 0, 1);
+
+  printf("first point of new element=%lf, %lf, %lf\n", cornew->coordinates[0], cornew->coordinates[1], cornew->coordinates[2]);
+  // loop through old elements which contain at least one corner of this current new element
+  for (int_ind; int_ind < forest_old_nr_elem;int_ind++){
+    std::cout<<"Start with element "<<int_ind<<" \n";
+    // Calculate the corner elements of the current old tree (in "corcoord_old")
+    t8_locidx_t ltree = cornew->intersection_cell_treeid.at(int_ind);
+    t8_locidx_t element_index = cornew->intersection_cell_indices.at(int_ind);
+    t8_tree_t tree = t8_forest_get_tree(forest_old, ltree);
+    t8_element_t* element = t8_forest_get_tree_element(tree, element_index);
+    t8_forest_get_element_nodes(forest_old, ltree, element, corcoord_old, cornew->element_shape_old);
+    printf("first point of old element=%lf, %lf, %lf\n", corcoord_old.at(0)[0], corcoord_old.at(0)[1], corcoord_old.at(0)[2]);
+    // find which corners/elements of old forest lie within the new element
+    //qKH: do we need this, i.e. might this happen several times? otherwise can just
+    //     check length of point_inside/=0
+    new_inside = true;
+    //qKH: only required once per element since due to shape of elements can only intersect twice max?
+    search_cross = true;
+    find_intersec_toold = true;
+    // if start not from 0 but from variable => can call this again later as function with updated
+    // start index variable
+    icorner_new = 0;
+    // need cycling through to icorner_new again?
+    // yes, probably - because start search only truly from corner which is inside, that might be the
+    // the first element but then old_inside still TRUE
+    // check if 2D or 3D
+    is_3D = true;
+    // re-initialize search_z
+    search_z=-1;
+    search_new = true;
+    z_shift=0;
+
+    // fill double-nested point_cloud with vector for first old element
+    //std::vector<double*> local_vec;
+    //local_vec.push_back(0);
+    //point_cloud.push_back(local_vec);
+
+    i_new=icorner_new;
+    icorn_new_cur = t8_element_corner_order_2D[cornew->element_shape_new][i_new];
+    // use z_shift also in main part!!
+    //for (i_new=icorner_new;i_new< (int) t8_eclass_num_vertices[cornew->element_shape_new];i_new++){
+    while (search_new){
+      std::cout<<"in loop of new index "<<icorn_new_cur<<" of "<<t8_eclass_num_vertices[cornew->element_shape_new]<<"\n";
+      // store index alongside search? then don't need to execute this exact same call twice?
+      corner_is_inside_element =
+        t8_forest_element_point_inside (forest_old, ltree, element, cornew->coordinates.at(icorn_new_cur), tolerance);
+      std::cout<<"corner is inside element "<< corner_is_inside_element<<"\n";
+      if (point_cloud.size()!=0 && !corner_is_inside_element){
+        new_inside = false;
+        std::cout<<"switch search order\n";
+        icorn_new_cur_start = icorn_new_cur;
+        icorn_old_cur_start = icorn_old_cur;
+        //while(search_cross){
+        // what is relevance of having this before or after the search_cross?
+        // shouldn't this be called only once?
+        if (find_intersec_toold){
+          t8_next_element(icorn_new_cur, icorn_new_prev, -1, cornew->element_shape_new);
+          icorn_new_next = icorn_new_cur;
+          icorn_new_cur = icorn_new_prev;
+          // start searching for intersection at same vertical level
+          i_old = z_shift;
+          /* look for edges of old element, starting from edge 0/face f2 */
+          icorn_old_cur = t8_element_corner_order_2D[cornew->element_shape_old][i_old];
+          t8_next_element(icorn_old_cur, icorn_old_next, +1, cornew->element_shape_old);
+        }
+        while(search_cross){
+          // find intersection between two neighboring points in old and new grid
+          if (!find_intersec_toold){
+            t8_vec_segxseg(corcoord_old.at(icorn_old_cur), corcoord_old.at(icorn_old_next),
+            cornew->coordinates.at(icorn_new_cur), cornew->coordinates.at(icorn_new_next),
+            tolerance, intersect_point, intersect_vertex, intersect_state, 0, 1);
+          }else{
+            t8_vec_segxseg(cornew->coordinates.at(icorn_new_cur), cornew->coordinates.at(icorn_new_next),
+            corcoord_old.at(icorn_old_cur), corcoord_old.at(icorn_old_next),
+            tolerance, intersect_point, intersect_vertex, intersect_state, 0, 1);
+          }
+          printf("P=%lf, %lf, %lf\n", intersect_point[0], intersect_point[1], intersect_point[2]);
+          printf("Q=%lf, %lf, %lf\n", intersect_vertex[0], intersect_vertex[1], intersect_vertex[2]);
+          std::cout<<"Intersec type "<<intersect_state<<"\n";
+          std::cout<<"from new to old "<<find_intersec_toold<<"\n";
+          std::cout<<"size point cloud "<<point_cloud.size()<<"\n";
+          // if two edges intersect in exactly one point
+          if (intersect_state=='1'){
+            // add intersection to list of points
+            //todo KH: add distinction for if_3D here - need to add z-coordinate
+            std::cout<<"- point cloud added in intersect_state='1'\n";
+            std::cout<<"size point cloud "<<point_cloud.size()<<"\n";
+            printf("P=%lf, %lf, %lf\n", intersect_point[0], intersect_point[1], intersect_point[2]);
+            intersect_points.push_back(0);
+            intersect_points.at(nr_intersect_points) = new double[3];
+            // order of memcpy: destination and then target
+            memcpy(intersect_points.at(nr_intersect_points), intersect_point, 3*sizeof(double));
+            std::cout<<"value of intersect to copy "<<intersect_points.at(nr_intersect_points)[0]<<" "<<intersect_points.at(nr_intersect_points)[1]<<"\n";
+            point_cloud.push_back(intersect_points.at(nr_intersect_points));
+            //point_cloud.push_back(intersect_point);
+            nr_intersect_points++;
+            // check if further elements are inside, depending on find_intersec_toold
+            if (!find_intersec_toold){ // from new to old
+              find_intersec_toold = true;
+              /* next few lines in seperate function based on int_ind?*/
+              search_cross = false;
+              // leave while(search_cross) loop
+              // can the next inside check be happening outside again?
+              corner_is_inside_element =
+                t8_forest_element_point_inside (forest_old, ltree, element, cornew->coordinates.at(icorn_new_next), tolerance);
+              icorn_new_cur = icorn_new_next; // store next point correctly outside of while check
+            }else{ // (!find_intersec_toold)
+              icorn_old_cur = icorn_old_next;
+              corner_is_inside_element =
+                  t8_forest_element_point_inside (forest_new, treeid_new, elem_new, corcoord_old[icorn_old_cur], tolerance);
+              start_index=icorn_old_cur;
+              while (corner_is_inside_element){
+                // todo KH: consider if_3D here
+                // add old corner element to point cloud
+                // qKH: but this doesn't necessarily need to be at same height as new element?!
+                if (is_3D){
+                  if (search_z == corcoord_old.at(icorn_old_cur)[2]){
+                    std::cout<<"- point cloud added in '1', intersec_toold, 3D\n";
+                    point_cloud.push_back(corcoord_old.at(icorn_old_cur));
+                  }
+                }else{
+                  std::cout<<"- point cloud added in '1, intersec_toold, 2D\n";
+                  point_cloud.push_back(corcoord_old.at(icorn_old_cur));
+                }
+                t8_next_element(icorn_old_cur, icorn_old_next, +1, cornew->element_shape_old);
+                icorn_old_cur = icorn_old_next; // add
+                if (icorn_old_cur == start_index){
+                  //std::cout<<"Have passed once through old element inside new\n";
+                  corner_is_inside_element=false;
+                  search_cross=false;
+                  //cKH: could stop whole search now
+                }else{
+                  corner_is_inside_element =
+                    t8_forest_element_point_inside (forest_new, treeid_new, elem_new, corcoord_old[icorn_old_cur], tolerance);
+                }
+              }
+              // previous point was the last one inside
+              // unless gone once in the round, then all are inside
+              if (!search_cross) t8_next_element(icorn_old_next, icorn_old_cur, -1, cornew->element_shape_old);
+              find_intersec_toold = false;
+              t8_next_element(icorn_old_cur, icorn_old_next, +1, cornew->element_shape_old);
+              //qKH: do we continue from the right new element?
+            } // if(!find_intersec_toold)
+            //std::cout<<"after corner_new_inside check\n";
+          }else if(intersect_state == 'e'){
+            if (find_intersec_toold){
+             bool test_p, test_q;
+             test_p = false;
+             test_q = false;
+             for (int i=0;i<point_cloud.size(); i++){
+               test_p = (((point_cloud.at(i)[0]==intersect_point[0]) && (point_cloud.at(i)[1]==intersect_point[1])) || test_p);
+               test_q = (((point_cloud.at(i)[0]==intersect_vertex[0]) && (point_cloud.at(i)[1]==intersect_vertex[1])) || test_q);
+             }
+             /*if (!test_p && test_q){
+               std::cout<<"- point cloud added in 'e', !test_p && test_q\n";
+               point_cloud.push_back(intersect_point);
+             }*/
+             if (test_p && !test_q && intersect_vertex[0]!=-1){
+               std::cout<<"- point cloud added in 'e', test_p && !test_q\n";
+               point_cloud.push_back(intersect_vertex);
+               find_intersec_toold = false;
+               t8_next_element(icorn_old_next, icorn_old_cur, +1, cornew->element_shape_old);
+               t8_next_element(icorn_old_cur, icorn_old_next, +1, cornew->element_shape_old);
+              }else{ // qKH: what happens else?
+               std::cout<<"- point cloud added in 'e', alternative\n";
+               point_cloud.push_back(intersect_point);
+               find_intersec_toold = false;
+             }
+            }
+            if (!find_intersec_toold){
+              // copied from above - if find_intersec_toold with code=1
+              printf("checking inside: old element=%lf, %lf, %lf\n", corcoord_old.at(icorn_old_cur)[0], corcoord_old.at(icorn_old_cur)[1], corcoord_old.at(icorn_old_cur)[2]);
+              corner_is_inside_element =
+                  t8_forest_element_point_inside (forest_new, treeid_new, elem_new, corcoord_old[icorn_old_cur], tolerance);
+              //std::cout<<"at least once should pass trough ('e')\n";
+              start_index=icorn_old_cur;
+              while (corner_is_inside_element){
+                // todo KH: consider if_3D here
+                // add old corner element to point cloud
+                // qKH: but this doesn't necessarily need to be at same height as new element?!
+                if (is_3D){
+                  // todo KH: is this search_z check needed sometimes?
+                  //if (search_z == corcoord_old.at(icorn_old_cur)[2]){
+                    std::cout<<"- point cloud added in 'e', !find_intersec_toold, 3D\n";
+                    point_cloud.push_back(corcoord_old.at(icorn_old_cur));
+                  //}
+                }else{
+                  std::cout<<"- point cloud added in 'e', !find_intersec_toold, 2D\n";
+                  point_cloud.push_back(corcoord_old.at(icorn_old_cur));
+                }
+                icorn_old_cur = icorn_old_next; // add
+                t8_next_element(icorn_old_cur, icorn_old_next, +1, cornew->element_shape_old);
+                if (icorn_old_cur == start_index){
+                  //std::cout<<"Have passed once through old element inside new\n";
+                  corner_is_inside_element=false;
+                  search_cross=false;
+                  //cKH: could stop whole search now
+                }else{
+                  corner_is_inside_element =
+                    t8_forest_element_point_inside (forest_new, treeid_new, elem_new, corcoord_old[icorn_old_cur], tolerance);
+                }
+              }
+            }
+          }//else{ // if (intersect_state == '1'))
+          // abort if have gone around once!
+          //qKH: do we always need to continue here? no, not for if intersection case - but in e case yes
+          if (search_cross){
+            if (!find_intersec_toold){
+              icorn_new_cur = icorn_new_next;
+              t8_next_element(icorn_new_cur, icorn_new_next, +1, cornew->element_shape_new);
+              if ((icorn_new_cur_start==icorn_new_cur) && (intersect_state == '0')){
+                std::cout<<"   abort search cross !find_intersec_toold\n";
+                search_cross=false;
+              }
+              // todo/qKH check that i_new doesn't get too large?
+            }else{ // (find_intersec_toold)
+              icorn_old_cur = icorn_old_next;
+              t8_next_element(icorn_old_cur, icorn_old_next, +1, cornew->element_shape_old);
+              if ((icorn_old_cur_start==icorn_old_cur) && (intersect_state == '0')){
+                std::cout<<"   abort search cross find_intersec_toold\n";
+                search_cross= false;
+                find_intersec_toold = false;
+              }
+            } // if(find_intersec_toold)
+          }
+        } // while(search_cross)
+      } // if (new_inside && !corner_is_inside_element){
+      // found corner of new forest in old element
+      if (corner_is_inside_element){
+        std::cout<<"corner is inside element is true\n";
+        // if not first corner: check that on same z-level
+        if ((is_3D) && (search_z==-1)){
+          // qKH: need to pass value here instead?
+          search_z = cornew->coordinates.at(icorn_new_cur)[2];
+          // check if looking at face f_4 or f_5
+          if (icorn_new_cur>3) z_shift = 4;   // considering f_5
+        }
+        if (point_cloud.size()!=0) std::cout<<"search_z is set to: "<<search_z<<" "<<cornew->coordinates.at(icorn_new_cur)[0]<<" "<<point_cloud.at(0)[0]<<"\n";
+        if (is_3D){
+          if (search_z == cornew->coordinates.at(icorn_new_cur)[2]){
+            if (point_cloud.size()!=0){
+            if (cornew->coordinates.at(icorn_new_cur)==point_cloud.at(0)){
+               search_new = false;
+               break;
+            }
+            }
+            std::cout<<"- just regular: new is inside old, 3D\n";
+            point_cloud.push_back(cornew->coordinates.at(icorn_new_cur));
+            //qKH: new_inside is no longer necessary, right?
+            new_inside=true;
+          }
+          if (point_cloud.size()!=0) std::cout<<"search_z is set to: "<<search_z<<" "<<cornew->coordinates.at(icorn_new_cur)[0]<<" "<<point_cloud.at(0)[0]<<"\n";
         }else{
-          t8_vec_segxseg(corner->coordinates.at(icorn_new_cur), corner->coordinates.at(icorn_new_next),
-          coordinates.at(icorn_old_cur), coordinates.at(icorn_old_next),
-          tolerance, intersect_point, intersect_vertex, intersect_state, 0, 1);
-        }
-        printf("P=%lf, %lf, %lf\n", intersect_point[0], intersect_point[1], intersect_point[2]);
-        printf("Q=%lf, %lf, %lf\n", intersect_vertex[0], intersect_vertex[1], intersect_vertex[2]);
-        // if two edges intersect in exactly one point
-        if (intersect_state=='1'){
-          // add intersection to list of points
-          //todo KH: add distinction for if_3D here - need to add z-coordinate
-          point_cloud.push_back(intersect_point);
-          // check if further elements are inside, depending on find_intersec_toold
-          if (!find_intersec_toold){ // from new to old
-            find_intersec_toold = true;
-            /* next few lines in seperate function based on int_ind?*/
-            search_cross = false;
-            // leave while(search_cross) loop
-            // can the next inside check be happening outside again?
-            corner_is_inside_element =
-              t8_forest_element_point_inside (forest_old, ltree, element, corner->coordinates.at(icorn_new_next), tolerance);
-            icorn_new_cur = icorn_new_next; // store next point correctly outside of while check
-          }else{ // (!find_intersec_toold)
-            icorn_old_cur = icorn_old_next;
-            corner_is_inside_element =
-                t8_forest_element_point_inside (forest_new, treeid_new, elem_new, coordinates[icorn_old_cur], tolerance);
-            std::cout<<"at least once should pass trough ('1')\n";
-            start_index=icorn_old_cur;
-            while (corner_is_inside_element){
-              // todo KH: consider if_3D here
-              // add old corner element to point cloud
-              // qKH: but this doesn't necessarily need to be at same height as new element?!
-              if (is_3D){
-                if (search_z == coordinates.at(icorn_old_cur)[2]){
-                  point_cloud.push_back(coordinates.at(icorn_old_cur));
-                }
-              }else{
-                point_cloud.push_back(coordinates.at(icorn_old_cur));
-              }
-              t8_next_element(icorn_old_cur, icorn_old_next, +1, corner->element_shape_old);
-              icorn_old_cur = icorn_old_next; // add
-              if (icorn_old_cur == start_index){
-                std::cout<<"Have passed once through old element inside new\n";
-                corner_is_inside_element=false;
-                search_cross=false;
-                //cKH: could stop whole search now
-              }else{
-                corner_is_inside_element =
-                  t8_forest_element_point_inside (forest_new, treeid_new, elem_new, coordinates[icorn_old_cur], tolerance);
-              }
-            }
-            // previous point was the last one inside
-            // unless gone once in the round, then all are inside
-            if (!search_cross) t8_next_element(icorn_old_next, icorn_old_cur, -1, corner->element_shape_old);
-            find_intersec_toold = false;
-            //qKH: do we continue from the right new element?
-          } // if(!find_intersec_toold) 
-          std::cout<<"after corner_new_inside check\n";
-        }else if(intersect_state == 'e'){
-          if (!find_intersec_toold){
-            // copied from above - if find_intersec_toold with code=1
-            corner_is_inside_element =
-                t8_forest_element_point_inside (forest_new, treeid_new, elem_new, coordinates[icorn_old_cur], tolerance);
-            std::cout<<"at least once should pass trough ('e')\n";
-            start_index=icorn_old_cur;
-            while (corner_is_inside_element){
-              // todo KH: consider if_3D here
-              // add old corner element to point cloud
-              // qKH: but this doesn't necessarily need to be at same height as new element?!
-              if (is_3D){
-                if (search_z == coordinates.at(icorn_old_cur)[2]){
-                  point_cloud.push_back(coordinates.at(icorn_old_cur));
-                }
-              }else{
-                point_cloud.push_back(coordinates.at(icorn_old_cur));
-              }
-              t8_next_element(icorn_old_cur, icorn_old_next, +1, corner->element_shape_old);
-              icorn_old_cur = icorn_old_next; // add
-              if (icorn_old_cur == start_index){
-                std::cout<<"Have passed once through old element inside new\n";
-                corner_is_inside_element=false;
-                search_cross=false;
-                //cKH: could stop whole search now
-              }else{
-                corner_is_inside_element =
-                  t8_forest_element_point_inside (forest_new, treeid_new, elem_new, coordinates[icorn_old_cur], tolerance);
-              }
-            }
-          }else{ // (if(find_intersec_toold)
-           std::cout<<"intersect state is 'e'\n";
-           std::cout<<"size point cloud "<<point_cloud.size()<<"\n";
-           bool test_p, test_q;
-           for (int i=0;i<point_cloud.size(); i++){
-             test_p = (((point_cloud.at(i)[0]==intersect_point[0]) && (point_cloud.at(i)[1]==intersect_point[1])) || test_p);
-             test_q = (((point_cloud.at(i)[0]==intersect_vertex[0]) && (point_cloud.at(i)[1]==intersect_vertex[1])) || test_q);
-           }
-           if (!test_p && test_q) point_cloud.push_back(intersect_point);
-           if (test_p && !test_q){
-             point_cloud.push_back(intersect_vertex); 
-             find_intersec_toold = false;
-             icorn_old_cur = icorn_old_next;
-             t8_next_element(icorn_old_cur, icorn_old_next, +1, corner->element_shape_old);
-            } // qKH: what happens else?
-          }
-        } //else{ // if (intersect_state == '1'))
-        //qKH: do we always need to continue here? no, not for if intersection case - but in e case yes
-        if (search_cross){
-          if (!find_intersec_toold){
-            icorn_new_cur = icorn_new_next;
-            t8_next_element(icorn_new_cur, icorn_new_next, +1, corner->element_shape_new);
-            // todo/qKH check that i_new doesn't get too large?
-          }else{ // (find_intersec_toold)
-            icorn_old_cur = icorn_old_next;
-            t8_next_element(icorn_old_cur, icorn_old_next, +1, corner->element_shape_old);
-          } // if(find_intersec_toold)
-        }
-      } // while(search_cross)
-    } // if (new_inside && !corner_is_inside_element){
-    // found corner of new forest in old element
-    if (corner_is_inside_element){
-      std::cout<<"corner is inside element is true\n";
-      // if not first corner: check that on same z-level
-      if ((is_3D) && (search_z==-1)){
-        // qKH: need to pass value here instead?
-        search_z = corner->coordinates.at(icorn_new_cur)[2];
-        // check if looking at face f_4 or f_5
-        if (icorn_new_cur>3) z_shift = 4;   // considering f_5
-      }
-      if (point_cloud.size()!=0) std::cout<<search_z<<" "<<corner->coordinates.at(icorn_new_cur)[0]<<" "<<point_cloud.at(0)[0]<<"\n";
-      if (is_3D){
-        if (search_z == corner->coordinates.at(icorn_new_cur)[2]){
-          if (point_cloud.size()!=0){
-          if (corner->coordinates.at(icorn_new_cur)==point_cloud.at(0)){
-             search_new = false;
-             break;
-          }
-          }
-          point_cloud.push_back(corner->coordinates.at(icorn_new_cur));
-          //qKH: new_inside is no longer necessary, right?
+          //todo KH: need to have stop check in 2D case as well
+          std::cout<<"- just regular: new is inside old, 2D\n";
+          point_cloud.push_back(cornew->coordinates.at(icorn_new_cur));
           new_inside=true;
         }
-      }else{
-        //todo KH: need to have stop check in 2D case as well
-        point_cloud.push_back(corner->coordinates.at(icorn_new_cur));
-        new_inside=true;
+        corner_is_inside_element = false;
+      } // if(corner_is_inside_element)
+      t8_next_element(icorn_new_cur, icorn_new_next, +1, cornew->element_shape_new);
+      icorn_new_cur = icorn_new_next;
+      std::cout<<"new cur element "<<icorn_new_cur<<" "<<icorn_new_next<<"\n";
+      // move to opposite face if first face hasn't resulted in matches (only if 3D)
+      if ((point_cloud.size() == 0) && (icorn_new_cur == i_new) && (is_3D)){
+        icorn_new_cur = 4;
       }
-      corner_is_inside_element = false;
-    } // if(corner_is_inside_element)
-    t8_next_element(icorn_new_cur, icorn_new_next, +1, corner->element_shape_new);
-    icorn_new_cur = icorn_new_next;
-    std::cout<<"new cur element "<<icorn_new_cur<<" "<<icorn_new_next<<"\n";
-  } // while(search_new)
+    } // while(search_new)
+    // Add check to see if just all old element corners within new element?
+    std::cout<<"   DONE, point cloud has "<<point_cloud.size()<<" elements\n";
+    for (int i=0;i<point_cloud.size();i++){
+      std::cout<<"axis "<<i<<": "<< point_cloud.at(i)[0]<<" "<<point_cloud.at(i)[1]<<"\n";
+    }
+    full_point_cloud.push_back(point_cloud);
+    point_cloud.clear();
+  } // loop over number of old elements
+  std::cout<<"   FIRST old element done\n";
   // Add check to see if just all old element corners within new element?
-  std::cout<<"DONE, point cloud has "<<point_cloud.size()<<" elements\n";
-  for (int i=0;i<point_cloud.size();i++){
-    std::cout<<"axis "<<i<<": "<< point_cloud.at(i)[0]<<" "<<point_cloud.at(i)[1]<<"\n";
+  std::cout<<"   DONE, point cloud has "<<full_point_cloud.size()<<" elements\n";
+  for (int i=0;i<full_point_cloud.size();i++){
+      std::cout<<"old element "<<i<<"\n";
+    for (int nr=0;nr<full_point_cloud.at(i).size();nr++){
+      std::cout<<"point cloud element "<<nr<<": "<< full_point_cloud.at(i).at(nr)[0]<<" "<<full_point_cloud.at(i).at(nr)[1]<<"\n";
+    }
   }
 //ltree_id in t8_cell_corners_t -> uebergeben
 // qKH: but doesn't "corners" already store the ltree_id value after the callback (for the old forest)?
@@ -804,7 +881,8 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
   for (itree = 0, ielem = 0; itree < t8_forest_get_num_local_trees (forest_new); itree++) {
     const t8_locidx_t num_elem = t8_forest_get_tree_num_elements (forest_new, itree);
     /* Inner loop: Iteration over the elements of the local tree */
-    for (t8_locidx_t ielem_tree = 0; ielem_tree < num_elem; ielem_tree++, ielem++) {
+    // use later on again!! for (t8_locidx_t ielem_tree = 0; ielem_tree < num_elem; ielem_tree++, ielem++) {
+    for (t8_locidx_t ielem_tree = 0; ielem_tree < 2; ielem_tree++, ielem++) {
       t8_cell_corners_t* corner
         = (t8_cell_corners_t *) sc_array_index_int (corners, ielem);
       // ( t8_forest_t forest1, t8_forest_t forest2, sc_array *corners, t8_element_t *elem2 )
@@ -813,10 +891,6 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
       //3) determine intersection (based on indices of old elements containing new corners))
       // qKH: what is difference ielem and ielem_t
       ielem_t = (t8_element_t *)  sc_array_index (corners, ielem);
-      if (ielem<4){
-        std::cout << "in cons_remap"<<"\n";
-        std::cout << corner->coordinates.at(1)[1]<<"\n";
-      }
       t8_locidx_t looptree=itree;
       auto element = t8_forest_get_element ( forest_new, ielem_tree, &looptree);
       // qKH: one cell_intersection function for all types, or varying?
