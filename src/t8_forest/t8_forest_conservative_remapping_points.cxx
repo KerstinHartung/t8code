@@ -39,6 +39,10 @@
 /*
  Approach:
  - generate points within old elements
+   - applying the batch-based search it seems easiest to store all points in one long list, including their
+     metadata (i.e. element of origin in old forest
+   - for now decided against just creating general grid of data, to allow even volume distribution within elements (although
+     this is not really the case yet, only for hexahedra))
  - loop through new elements
    - and search for old elements inside (ensure that not counting double)
    - and calculate weights of old elements and sum to get new value
@@ -100,6 +104,7 @@ t8_forest_get_element_points_inside (t8_forest_t forest, t8_locidx_t ltreeid, co
   const double tolerance = 1e-8;
   out_coords.push_back(0);
   ipoint = 0;
+  double step = 1/number_points;
   out_coords.at(ipoint) = new double[3];
   for( int isize = 0; isize < t8_element_corner_ref_coords[element_shape][num_corner][0]*number_points; isize++ )
   {
@@ -109,7 +114,7 @@ t8_forest_get_element_points_inside (t8_forest_t forest, t8_locidx_t ltreeid, co
       {
         // fill vector
         //const double *ref_coords = t8_element_corner_ref_coords[element_shape][T8_ECLASS_MAX_CORNERS][idim];
-        const double ref_coords[3] = {isize*1/number_points,jsize*1/number_points,ksize*1/number_points};
+        const double ref_coords[3] = {step*(0.5+isize),(0.5+jsize)*step,(0.5+ksize)*step};
         // add corner elements, function requires pre-existing memory
         t8_forest_element_from_ref_coords (forest, ltreeid, element, ref_coords, 1, out_coords.at(ipoint));
         t8_forest_element_points_inside (forest, ltreeid, element,
@@ -165,9 +170,22 @@ t8_search_points_query_callback (t8_forest_t forest, const t8_locidx_t ltreeid, 
                                    int *query_matches, const size_t num_active_queries)
                                    //void *query, size_t query_index)
 {
-  int *point_is_inside_element;
-  t8_cell_old_t *points_of_cell = (t8_cell_old_t *) queries;
-  T8_ASSERT (query != NULL);
+  //t8_cell_old_t *points_of_cell = (t8_cell_old_t *) queries;
+  //T8_ASSERT (query != NULL);
+  /* Build an array of all point-coords, used for t8_forest_element_point_batch_inside */
+  double *coords = T8_ALLOC (double, 3 * num_active_queries);
+  for (size_t point_iter = 0; point_iter < num_active_queries; point_iter++) {
+    /* Get the query at the current query-index (point_iter in this case). */
+    // pointer_iter=point_id only in the beginning, will change once number of queries reduces
+    const size_t point_id = *(size_t *) sc_array_index_int (query_indices, point_iter);
+    /* Cast the query into a particle*/
+    t8_cell_old_t *point
+      = (t8_cell_old_t *) sc_array_index ((sc_array_t *) queries, point_id);
+    /* extract the coordinates of the particle struct */
+    coords[3 * point_iter] = point->coord_point.at(0)[0];
+    coords[3 * point_iter + 1] = point->coord_point.at(0)[1];
+    coords[3 * point_iter + 2] = point->coord_point.at(0)[2];
+  }
   t8_search_user_data_t *build_new_cell = (t8_search_user_data_t *) t8_forest_get_user_data (forest);
   T8_ASSERT (build_new_cell != NULL);
   /* Numerical tolerance for the is_inside_element check. */
@@ -179,7 +197,7 @@ t8_search_points_query_callback (t8_forest_t forest, const t8_locidx_t ltreeid, 
   for( size_t ipoint = 0; ipoint < points_of_cell->coord_point.size(); ipoint++ )
   {
     t8_forest_element_points_inside (forest, ltreeid, element,
-        points_of_cell->coord_point.at(ipoint), 1, point_is_inside_element, tolerance);
+        points_of_cell->coord_point.at(ipoint), 1, num_active_queries, tolerance);
     // point of old element is inside new and not already counted
     if (point_is_inside_element && points_of_cell->point_counted.at(ipoint)==0) {
       if (is_leaf) {
