@@ -155,6 +155,11 @@ t8_search_corners_element_callback (t8_forest_t forest, t8_locidx_t ltreeid, con
  * a counter for this element by one.
  * These counters are provided in an sc_array as user data of the input forest.
  */
+
+/*
+QUESTION/TODO: isn't this an issue here that 
+corners_of_cell picks index icorner of coordinates but associates this via push_back to different index of 
+*/
 static int
 t8_search_corners_query_callback (t8_forest_t forest, t8_locidx_t ltreeid, const t8_element_t *element,
                                    const int is_leaf, t8_element_array_t *leaf_elements, t8_locidx_t tree_leaf_index,
