@@ -45,6 +45,7 @@ add_t8_tutorial( NAME t8_tutorial_build_cmesh           SOURCES general/t8_tutor
 add_t8_tutorial( NAME t8_tutorial_search                SOURCES general/t8_tutorial_search.cxx general/t8_step3_adapt_forest.cxx )
 add_t8_tutorial( NAME t8_features_curved_meshes         SOURCES features/t8_features_curved_meshes.cxx)
 add_t8_tutorial( NAME t8_cons_remap                     SOURCES features/t8_features_conservative_remapping.cxx)
+add_t8_tutorial( NAME t8_cons_remap_points              SOURCES features/t8_features_conservative_remapping_points.cxx)
 
 copy_tutorial_file (features/t8_features_curved_meshes_generate_cmesh_hex.geo)
 copy_tutorial_file (features/t8_features_curved_meshes_generate_cmesh_quad.geo)
