@@ -45,12 +45,12 @@
  */                                                                                                                             
                                                                         
 #include <t8.h>                                     /* General t8code header, always include this. */
-#include <t8_cmesh.h>                               /* cmesh definition and basic interface. */
+#include <t8_cmesh.hxx>                             /* cmesh definition and basic interface. */
 #include <t8_cmesh/t8_cmesh_examples.h>             /* A collection of exemplary cmeshes */
 #include <t8_forest/t8_forest_general.h>            /* forest definition and general interface. */
 #include <t8_forest/t8_forest_io.h>                 /* forest io interface. */
-#include <t8_schemes/t8_default/t8_default_cxx.hxx> /* default refinement scheme. */
-#include <t8_geometry/t8_geometry_implementations/t8_geometry_linear.h> /* linear geometry of the cmesh */
+#include <t8_schemes/t8_default/t8_default.hxx> /* default refinement scheme. */
+#include <t8_geometry/t8_geometry_implementations/t8_geometry_linear.hxx> /* linear geometry of the cmesh */
 #include <t8_forest/t8_forest_conservative_remapping.cxx>
 
 /* Builds cmesh of 2 prisms that build up a unit cube. 
@@ -105,8 +105,7 @@ t8_cmesh_new_periodic_hybrid_2d (sc_MPI_Comm comm)
   t8_cmesh_init (&cmesh);
 
   /* 3. Definition of the geometry */
-  t8_geometry_c *linear_geom = t8_geometry_linear_new (2);
-  t8_cmesh_register_geometry (cmesh, linear_geom); /* Use linear geometry */
+  t8_cmesh_register_geometry<t8_geometry_linear> (cmesh); /* Use linear geometry */
 
   /* 4. Definition of the classes of the different trees */
   t8_cmesh_set_tree_class (cmesh, 0, T8_ECLASS_TRIANGLE);
