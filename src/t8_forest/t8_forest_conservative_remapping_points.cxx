@@ -33,7 +33,7 @@
 #include <t8_forest/t8_forest_geometrical.h>
 #include <t8_forest/t8_forest_iterate.h>
 #include <t8_forest/t8_forest_private.h>
-#include <t8_element.hxx>
+#include <t8_element.h>
 #include <vector>
 
 /*
@@ -97,8 +97,8 @@ t8_forest_get_element_points_inside (t8_forest_t forest, t8_locidx_t ltreeid, co
                                  std::vector<double*> &out_coords)
 {
   const t8_eclass_t tree_class = t8_forest_get_tree_class (forest, ltreeid);
-  const t8_eclass_scheme_c *scheme = t8_forest_get_eclass_scheme (forest, tree_class);
-  t8_element_shape_t element_shape = scheme->t8_element_shape (element);
+  const t8_scheme *scheme = t8_forest_get_scheme (forest);
+  t8_element_shape_t element_shape = scheme->element_get_shape (tree_class, element);
   int num_corner = t8_eclass_num_vertices[element_shape];
   int *point_is_inside_element;
   const double tolerance = 1e-8;

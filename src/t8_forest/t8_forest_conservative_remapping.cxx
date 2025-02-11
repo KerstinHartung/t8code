@@ -33,7 +33,7 @@
 #include <t8_forest/t8_forest_geometrical.h>
 #include <t8_forest/t8_forest_iterate.h>
 #include <t8_forest/t8_forest_private.h>
-#include <t8_element.hxx>
+#include <t8_element.h>
 #include <vector>
 
 
@@ -107,8 +107,9 @@ t8_forest_get_element_nodes (t8_forest_t forest, t8_locidx_t ltreeid, const t8_e
                                  std::vector<double*> &out_coords, t8_element_shape_t &element_shape)
 {
   const t8_eclass_t tree_class = t8_forest_get_tree_class (forest, ltreeid);
-  const t8_eclass_scheme_c *scheme = t8_forest_get_eclass_scheme (forest, tree_class);
-  element_shape = scheme->t8_element_shape (element);
+  // was using t8_eclass_scheme_c *scheme = t8_forest_get_eclass_scheme (forest, tree_class);
+  const t8_scheme *scheme = t8_forest_get_scheme (forest);
+  element_shape = scheme->element_get_shape (tree_class,element);
   int num_corner = t8_eclass_num_vertices[element_shape];
   for( int icorner = 0; icorner < num_corner; icorner++ )
   {
@@ -846,8 +847,10 @@ void t8_free_corners( t8_forest_t forest, sc_array *corners)
       t8_locidx_t looptree=itree;
       auto element = t8_forest_get_element ( forest, ielem_tree, &looptree);
       const t8_eclass_t tree_class = t8_forest_get_tree_class (forest, looptree);
-      const t8_eclass_scheme_c *scheme = t8_forest_get_eclass_scheme (forest, tree_class);
-      t8_element_shape_t element_shape = scheme->t8_element_shape (element);
+      // update from t8_eclass_scheme_c to t8_scheme correct?
+      // before using t8_forest_get_eclass_scheme (forest, tree_class)
+      const t8_scheme *scheme = t8_forest_get_scheme (forest);
+      t8_element_shape_t element_shape = scheme->element_get_shape (tree_class, element);
       int num_corner = t8_eclass_num_vertices[element_shape];
       for( int icorner = 0; icorner < num_corner; icorner++ ){
          delete corner->coordinates.at(icorner);
