@@ -193,29 +193,29 @@ t8_search_points_query_callback (t8_forest_t forest, const t8_locidx_t ltreeid, 
 
   // search for old points in new element, i.e. forest parameters below refers to forest_new
   // loop through old element points
-  int no_points_inside = true;
-  for( size_t ipoint = 0; ipoint < points_of_cell->coord_point.size(); ipoint++ )
-  {
-    t8_forest_element_points_inside (forest, ltreeid, element,
-        points_of_cell->coord_point.at(ipoint), 1, num_active_queries, tolerance);
-    // point of old element is inside new and not already counted
-    if (point_is_inside_element && points_of_cell->point_counted.at(ipoint)==0) {
-      if (is_leaf) {
-        //add index of the old element to list of new element, to calculate new value later on
-        build_new_cell->element_index.push_back( points_of_cell->cell_index );
-        build_new_cell->element_treeid.push_back( points_of_cell->cell_treeid );
-        //add volume, as correctness test
-        build_new_cell->volume_cell_remapped += points_of_cell->volume_cell_part;
-        // store that this point was counted now
-        points_of_cell->point_counted.at(ipoint) = 1;
-      }
-      no_points_inside = false;
-      // TODO what to do here?? where should "return 1" be, now that points are very much independent
-      /* The particles is inside the element (finding one corner is sufficient). This query should remain active.
-       * If this element is not a leaf the search will continue with its children. */
-  //    return 1;
-    }
-  }
+//  int no_points_inside = true;
+//  for( size_t ipoint = 0; ipoint < points_of_cell->coord_point.size(); ipoint++ )
+//  {
+//    t8_forest_element_points_inside (forest, ltreeid, element,
+//        points_of_cell->coord_point.at(ipoint), 1, num_active_queries, tolerance);
+//    // point of old element is inside new and not already counted
+//    if (point_is_inside_element && points_of_cell->point_counted.at(ipoint)==0) {
+//      if (is_leaf) {
+//        //add index of the old element to list of new element, to calculate new value later on
+//        build_new_cell->element_index.push_back( points_of_cell->cell_index );
+//        build_new_cell->element_treeid.push_back( points_of_cell->cell_treeid );
+//        //add volume, as correctness test
+//        build_new_cell->volume_cell_remapped += points_of_cell->volume_cell_part;
+//        // store that this point was counted now
+//        points_of_cell->point_counted.at(ipoint) = 1;
+//      }
+//      no_points_inside = false;
+//      // TODO what to do here?? where should "return 1" be, now that points are very much independent
+//      /* The particles is inside the element (finding one corner is sufficient). This query should remain active.
+//       * If this element is not a leaf the search will continue with its children. */
+//  //    return 1;
+//    }
+//  }
   //if (no_points_inside || sum(points_of_cell->point_counted) == points_of_cell->coord_point.size()){
     /* No points of this element are inside the new element or all were already matches. Deactivate this query.
      * If no active queries are left, the search will stop for this element and its children. */
