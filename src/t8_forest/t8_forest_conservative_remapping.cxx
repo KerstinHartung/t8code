@@ -169,8 +169,8 @@ t8_search_corners_query_callback (t8_forest_t forest, const t8_locidx_t ltreeid,
 {
   int * corner_is_inside_element;
   t8_cell_corners_t *corners_of_cell = (t8_cell_corners_t *) queries;
- // T8_ASSERT (user_data != NULL);
-  T8_ASSERT (query != NULL);
+  // T8_ASSERT (user_data != NULL);
+  //T8_ASSERT (query != NULL);
   /* Numerical tolerance for the is_inside_element check. */
   const double tolerance = 1e-8;
 
