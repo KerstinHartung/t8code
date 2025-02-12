@@ -115,8 +115,9 @@ t8_forest_get_element_points_inside (t8_forest_t forest, t8_locidx_t ltreeid, co
         // fill vector
         //const double *ref_coords = t8_element_corner_ref_coords[element_shape][T8_ECLASS_MAX_CORNERS][idim];
         const double ref_coords[3] = {step*(0.5+isize),(0.5+jsize)*step,(0.5+ksize)*step};
-        // add corner elements, function requires pre-existing memory
+        // transfer reference to absolute coordinates, function requires pre-existing memory
         t8_forest_element_from_ref_coords (forest, ltreeid, element, ref_coords, 1, out_coords.at(ipoint));
+        // double-check that generated point really within considered element
         t8_forest_element_points_inside (forest, ltreeid, element,
                 out_coords.at(ipoint), 1, point_is_inside_element, tolerance);
         if (point_is_inside_element){
@@ -163,6 +164,7 @@ t8_search_points_element_callback (t8_forest_t forest, const t8_locidx_t ltreeid
  */
 // Note: forest will be forest_new
 // Note: this was updated to t8code v3, but only to compile, not yet checked for reasonability
+// structure and setup mainly from tutorials/general/t8_tutorial_search.cxx
 static void
 t8_search_points_query_callback (t8_forest_t forest, const t8_locidx_t ltreeid, const t8_element_t *element,
                                    const int is_leaf, const t8_element_array_t *leaf_elements,
@@ -181,16 +183,43 @@ t8_search_points_query_callback (t8_forest_t forest, const t8_locidx_t ltreeid, 
     /* Cast the query into a particle*/
     t8_cell_old_t *point
       = (t8_cell_old_t *) sc_array_index ((sc_array_t *) queries, point_id);
+    //TODO: add check here if point was already counted?
+    //if (point->point_counted.at(0)==1)
     /* extract the coordinates of the particle struct */
+    //TODO: loop through all points per element/query considered
     coords[3 * point_iter] = point->coord_point.at(0)[0];
     coords[3 * point_iter + 1] = point->coord_point.at(0)[1];
     coords[3 * point_iter + 2] = point->coord_point.at(0)[2];
   }
   t8_search_user_data_t *build_new_cell = (t8_search_user_data_t *) t8_forest_get_user_data (forest);
+  // currently error here: check fails
   T8_ASSERT (build_new_cell != NULL);
   /* Numerical tolerance for the is_inside_element check. */
   const double tolerance = 1e-8;
+  T8_ASSERT (queries != NULL);
 
+  /* Test whether the particles are inside this element. */
+  t8_forest_element_points_inside (forest, ltreeid, element, coords, num_active_queries, query_matches, tolerance);
+  T8_FREE (coords);
+  for (size_t matches_id = 0; matches_id < num_active_queries; matches_id++) {
+    if (query_matches[matches_id]) {
+      if (is_leaf) {
+        /* The particle is inside and this element is a leaf element.
+       * We mark the particle for being inside the partition and we increase
+       * the particles_per_element counter of this element. */
+        /* In order to find the index of the element inside the array, we compute the
+       * index of the first element of this tree plus the index of the element within
+       * the tree. */
+        t8_locidx_t element_index = t8_forest_get_tree_element_offset (forest, ltreeid) + tree_leaf_index;
+        /* Get the correct particle_id */
+        size_t particle_id = *(size_t *) sc_array_index_int (query_indices, matches_id);
+        t8_cell_old_t *particle
+          = (t8_cell_old_t *) sc_array_index ((sc_array_t *) queries, particle_id);
+        //particle->is_inside_partition = 1;
+        //*(double *) t8_sc_array_index_locidx (particles_per_element, element_index) += 1;
+      }
+    }
+  }
   // search for old points in new element, i.e. forest parameters below refers to forest_new
   // loop through old element points
 //  int no_points_inside = true;
@@ -216,11 +245,11 @@ t8_search_points_query_callback (t8_forest_t forest, const t8_locidx_t ltreeid, 
 //  //    return 1;
 //    }
 //  }
-  //if (no_points_inside || sum(points_of_cell->point_counted) == points_of_cell->coord_point.size()){
-    /* No points of this element are inside the new element or all were already matches. Deactivate this query.
-     * If no active queries are left, the search will stop for this element and its children. */
- //   return 0;
- // }
+//  if (no_points_inside || sum(points_of_cell->point_counted) == points_of_cell->coord_point.size()){
+//    /* No points of this element are inside the new element or all were already matches. Deactivate this query.
+//     * If no active queries are left, the search will stop for this element and its children. */
+//    return 0;
+//  }
 }
 
 /* For old forest - build points that span elements */
@@ -277,14 +306,14 @@ t8_forest_conservative_remapping_planar( t8_forest_t forest_old, t8_forest_t for
   int ielem;
   t8_element_t *ielem_t;
   t8_locidx_t itree;
-  int nr_points;
+  int nr_points=20;
   //0) construct poinst in old elements
   sc_array *points = t8_build_points(forest_old, nr_points);
   printf("points built\n");
   // debugging
   ielem=0;
   t8_cell_old_t *point= (t8_cell_old_t *) sc_array_index_int (points, ielem);
-  std::cout << point->coord_point.at(2)[1]<<"\n";
+  //std::cout << point->coord_point.at(2)[1]<<"\n";
   //1) find elements of new forest which contain points in old elements
   //   the search already loops through all elements of new forest
   t8_forest_search(forest_new, t8_search_points_element_callback, t8_search_points_query_callback, points);
